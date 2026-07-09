@@ -11,6 +11,7 @@
 extern int ProcFsHelper_readV2_config(struct seq_file* file, App* app);
 extern int ProcFsHelper_readV2_buildConfig(struct seq_file* file, App* app);
 extern int ProcFsHelper_readV2_status(struct seq_file* file, App* app);
+extern int ProcFsHelper_readV2_cacheStats(struct seq_file* file, App* app);
 extern int ProcFsHelper_readV2_fsUUID(struct seq_file* file, App* app);
 extern int ProcFsHelper_readV2_nodes(struct seq_file* file, App* app, struct NodeStoreEx* nodes);
 extern int ProcFsHelper_readV2_clientInfo(struct seq_file* file, App* app);

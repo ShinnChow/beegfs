@@ -414,11 +414,21 @@ void Serialization_deserializeNodeList(App* app, const RawList* inList, NodeList
       {// construct node
          Node* node;
          App_lockNicList(app);
-         node = Node_construct(app, nodeID, nodeNumID, portUDP, portTCP, &nicList,
-            nodeType == NODETYPE_Meta || nodeType == NODETYPE_Storage? App_getLocalRDMANicListLocked(app) : NULL);
-         App_unlockNicList(app);
+         {
+            Node_InitParams params = {0};
+            params.app = app;
+            params.nodeID = nodeID;
+            params.nodeNumID = nodeNumID;
+            params.nodeType = (NodeType) nodeType;
+            params.portUDP = portUDP;
+            params.portTCP = portTCP;
+            params.nicList = &nicList;
+            params.localRdmaNicList = (nodeType == NODETYPE_Meta || nodeType == NODETYPE_Storage)
+               ? App_getLocalRDMANicListLocked(app) : NULL;
 
-         Node_setNodeAliasAndType(node, NULL, (NodeType)nodeType);
+            node = Node_construct(&params);
+         }
+         App_unlockNicList(app);
 
          // append node to outList
          NodeList_append(outNodeList, node);

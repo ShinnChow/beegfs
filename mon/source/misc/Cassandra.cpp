@@ -137,6 +137,12 @@ Cassandra::Cassandra(Config config) :
          "diskSpaceTotal bigint, diskSpaceFree bigint, inodesTotal int, inodesFree int, "
          "PRIMARY KEY(time, nodeNumID));");
 
+   query("CREATE TABLE IF NOT EXISTS metaTargetData ("
+         "time timestamp, nodeNumID int, nodeID varchar, "
+         "diskSpaceTotal bigint, diskSpaceFree bigint, inodesTotal bigint, inodesFree bigint, "
+         "targetConsistencyState varchar, "
+         "PRIMARY KEY(time, nodeNumID));");
+
    query("CREATE TABLE IF NOT EXISTS metaClientOpsByNode ("
          "time timestamp, node varchar, ops map<varchar,int> ,"
          "PRIMARY KEY(time, node));");
@@ -178,14 +184,17 @@ void Cassandra::insertMetaNodeData(std::shared_ptr<Node> node, const MetaNodeDat
    statement << "INSERT INTO meta ";
    statement << "(time, nodeNumID, nodeID, isResponding";
    if (data.isResponding)
-      statement << ", indirectWorkListSize, directWorkListSize) ";
+      statement << ", indirectWorkListSize, directWorkListSize"
+                << ", invalNumWatchers, invalWatchNumInodes) ";
    else
       statement << ") ";
    statement << "VALUES (";
    statement << "TOTIMESTAMP(NOW()), " << node->getNumID() << ", '" << node->getAlias() << "', ";
    statement << std::boolalpha << data.isResponding;
    if (data.isResponding)
-      statement << ", " << data.indirectWorkListSize << ", " << data.directWorkListSize << ") ";
+      statement << ", " << data.indirectWorkListSize << ", " << data.directWorkListSize
+                << ", " << data.invalWatchStat.numWatchers << ", " << data.invalWatchStat.numTargets
+                << ") ";
    else
       statement << ") ";
    statement << "USING TTL " << config.TTLSecs << ";";
@@ -264,6 +273,30 @@ void Cassandra::insertStorageTargetsData(std::shared_ptr<Node> node,
    appendQuery(statement.str());
 }
 
+void Cassandra::insertMetaTargetsData(std::shared_ptr<Node> node,
+      const StorageTargetInfo& data)
+{
+   std::string consistencyState;
+   if (data.getState() == TargetConsistencyState::TargetConsistencyState_GOOD)
+      consistencyState = "GOOD";
+   else if (data.getState() == TargetConsistencyState::TargetConsistencyState_NEEDS_RESYNC)
+      consistencyState = "NEEDS_RESYNC";
+   else
+      consistencyState = "BAD";
+
+   std::ostringstream statement;
+   statement << "INSERT INTO metaTargetData ";
+   statement << "(time, nodeNumID, nodeID, ";
+   statement << "diskSpaceTotal, diskSpaceFree, inodesTotal, inodesFree, targetConsistencyState) VALUES (";
+   statement << "TOTIMESTAMP(NOW()), " << node->getNumID() << ", '" << node->getAlias() << "', ";
+   statement << data.getDiskSpaceTotal() << ", " << data.getDiskSpaceFree() << ", ";
+   statement << data.getInodesTotal() << ", " << data.getInodesFree() << ", ";
+   statement << "'" << consistencyState << "') ";
+   statement << "USING TTL " << config.TTLSecs << ";";
+
+   appendQuery(statement.str());
+}
+
 void Cassandra::insertClientNodeData(const std::string& id, const NodeType nodeType,
       const std::map<std::string, uint64_t>& opMap, bool perUser)
 {
@@ -310,6 +343,22 @@ void Cassandra::insertClientNodeData(const std::string& id, const NodeType nodeT
    // if no fields are != 0, dont write anything
    if (!first)
       appendQuery(statement.str());
+}
+
+void Cassandra::insertPerClientInvalWatchData(
+      std::shared_ptr<Node> node,
+      const InvalWatcherStat& entry)
+{
+   std::ostringstream statement;
+   statement << "INSERT INTO invalWatchPerClient ";
+   statement << "(time, nodeNumID, nodeID, clientId, watchedInodeCount, numInvalidations) VALUES (";
+   statement << "TOTIMESTAMP(NOW()), " << node->getNumID() << ", '"
+             << node->getAlias() << "', "
+             << entry.clientId << ", " << entry.watchedTargetCount
+             << ", " << entry.numInvalidations << ") ";
+   statement << "USING TTL " << config.TTLSecs << ";";
+
+   appendQuery(statement.str());
 }
 
 void Cassandra::appendQuery(const std::string& query)

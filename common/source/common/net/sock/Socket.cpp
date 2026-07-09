@@ -28,7 +28,12 @@ Socket::Socket()
 
 Socket::~Socket()
 {
-   // nothing to be done here
+   if (this->commContextCleanupFunc)
+   {
+      this->commContextCleanupFunc(this->commContext);
+   }
+   this->commContext = NULL;
+   this->commContextCleanupFunc = NULL;
 }
 
 

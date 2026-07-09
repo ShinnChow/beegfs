@@ -54,6 +54,13 @@ void* os_kzalloc(size_t size)
    return buf;
 }
 
+/* malloc wrappers to increase safety. Specify the type for automatic size
+ * computation and pointer casting. */
+#define beegfs_kmalloc(type, count, flags) ((type *) kmalloc((count) * sizeof (type), (flags)))
+#define beegfs_kzalloc(type, count, flags) ((type *) kzalloc((count) * sizeof (type), (flags)))
+#define os_kmalloc_type(type, count) ((type *) os_kmalloc((count) * sizeof (type)))
+#define os_kzalloc_type(type, count) ((type *) os_kmalloc((count) * sizeof (type)))
+
 /**
  * strncasecmp was broken in the linux kernel pre-3.18. strnicmp was
  * implemented correctly in that timeframe. In kernel >= 3.18, strnicmp

@@ -1,4 +1,5 @@
 #include <session/EntryLock.h>
+#include <components/InvalWatch.h>
 #include "SetFilePatternMsgEx.h"
 
 bool SetFilePatternMsgEx::processIncoming(ResponseContext& ctx)
@@ -64,6 +65,12 @@ std::unique_ptr<MirroredMessageResponseState> SetFilePatternMsgEx::executeLocall
    }
 
    metaStore->releaseFile(entryInfo->getParentEntryID(), inode);
+
+   // Trigger remote cache invalidation
+   // Only on primary - secondary doesn't have client watch registrations
+   if (!isSecondary && res == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(entryInfo->getEntryID());
+
    return boost::make_unique<ResponseState>(res);
 }
 

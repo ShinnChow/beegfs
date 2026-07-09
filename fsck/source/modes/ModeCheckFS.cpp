@@ -265,7 +265,7 @@ int ModeCheckFS::execute()
                case FhgfsOpsErr_INUSE:
                   errStr = "Another instance of beegfs-fsck is still running or was aborted. "
                      "Cannot start a new one unless --forceRestart command line switch is used. "
-                     "Do this only after making sure there is no other instance of beefs-fsck "
+                     "Do this only after making sure there is no other instance of beegfs-fsck "
                      "running.";
 
                   // stop the modification event handler
@@ -339,7 +339,7 @@ int ModeCheckFS::execute()
             case FhgfsOpsErr_INUSE:
                errStr = "Another instance of beegfs-fsck is still running or was aborted. "
                   "Cannot start a new one unless --forceRestart command line switch is used. "
-                  "Do this only after making sure there is no other instance of beefs-fsck "
+                  "Do this only after making sure there is no other instance of beegfs-fsck "
                   "running.";
                break;
             default:
@@ -1865,9 +1865,9 @@ void ModeCheckFS::repairWrongChunkPath(std::pair<FsckChunk, FsckFileInode>& erro
 {
    errCount.fixableErrors++;
 
-   FsckRepairAction action = prompt.chooseAction("Entry ID: " + error.first.getID()
+   FsckRepairAction action = prompt.chooseAction("Chunk ID: " + error.first.getID()
       + "; " + (error.first.getBuddyGroupID()
-         ? "Group: " + StringTk::uintToStr(error.first.getBuddyGroupID())
+         ? "Buddy group: " + StringTk::uintToStr(error.first.getBuddyGroupID())
          : "Target: " + StringTk::uintToStr(error.first.getTargetID()))
       + "; Chunk path: " + error.first.getSavedPath()->str()
       + "; File path: "

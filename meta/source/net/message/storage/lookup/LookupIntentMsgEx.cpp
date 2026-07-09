@@ -13,6 +13,7 @@
 #include <net/msghelpers/MsgHelperStat.h>
 #include <session/EntryLock.h>
 #include <session/SessionStore.h>
+#include <components/InvalWatchClient.h>
 #include <storage/DentryStoreData.h>
 #include <common/storage/StoragePool.h>
 #include "LookupIntentMsgEx.h"
@@ -216,6 +217,9 @@ std::unique_ptr<MirroredMessageResponseState> LookupIntentMsgEx::executeLocally(
       // check if lookup and create failed (we don't have an entryID to stat then)
       if (diskEntryInfo.getEntryID().empty())
          return boost::make_unique<ResponseState>(std::move(response));
+
+      // Set the watch _before_ updating the stat data.
+      add_target_watch_for_connected_watcher(ctx, &diskEntryInfo);
 
       if ((diskEntryInfo.getFeatureFlags() & ENTRYINFO_FEATURE_INLINED) && !inodeDataOutdated)
       {

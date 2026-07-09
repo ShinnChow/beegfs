@@ -77,6 +77,11 @@ class StringTk
          return strToInt64(s.c_str() );
       }
 
+      static uint64_t strToUInt64(const std::string s)
+      {
+         return strToUInt64(s.c_str() );
+      }
+
       static bool strToBool(const std::string s)
       {
          return strToBool(s.c_str() );

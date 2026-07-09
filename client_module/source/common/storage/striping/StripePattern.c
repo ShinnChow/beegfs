@@ -88,6 +88,8 @@ StripePattern* StripePattern_createFromBuf(const char* patternStart,
       return pattern;
    }
 
+   pattern->storagePoolId = patternHeader.storagePoolId;
+
    return pattern;
 
 }

@@ -8,6 +8,11 @@
 #include <common/threading/Thread.h>
 #include <common/toolkit/ListTk.h>
 #include <common/toolkit/NetFilter.h>
+#include <common/net/message/nodes/HandshakeMsg.h>
+#include <common/net/message/nodes/HandshakeRespMsg.h>
+#include <components/InvalReader.h>
+#include <common/toolkit/MessagingTk.h>
+
 #ifdef BEEGFS_NVFS
 #include <common/storage/RdmaInfo.h>
 #endif
@@ -22,21 +27,20 @@
  * @param parentNode the node object to which this conn pool belongs.
  * @param nicList an internal copy will be created.
  */
-void NodeConnPool_init(NodeConnPool* this, struct App* app, struct Node* parentNode,
-   unsigned short streamPort, NicAddressList* nicList, NicAddressList* localRdmaNicList)
+void NodeConnPool_init(NodeConnPool* this, NodeConnPool_InitParams const *params)
 {
-   Config* cfg = App_getConfig(app);
+   Config* cfg = App_getConfig(params->app);
 
-   this->app = app;
+   this->app = params->app;
 
    Mutex_init(&this->mutex);
    Condition_init(&this->changeCond);
 
    ConnectionList_init(&this->connList, true);
 
-   ListTk_cloneNicAddressList(nicList, &this->nicList, true);
-   if (localRdmaNicList)
-      ListTk_cloneNicAddressList(localRdmaNicList, &this->localRdmaNicList, true);
+   ListTk_cloneNicAddressList(params->nicList, &this->nicList, true);
+   if (params->localRdmaNicList)
+      ListTk_cloneNicAddressList(params->localRdmaNicList, &this->localRdmaNicList, true);
    else
       NicAddressList_init(&this->localRdmaNicList);
 
@@ -49,8 +53,8 @@ void NodeConnPool_init(NodeConnPool* this, struct App* app, struct Node* parentN
 
    sema_init(&this->connSemaphore, this->maxConcurrentAttempts);
 
-   this->parentNode = parentNode;
-   this->streamPort = streamPort;
+   this->parentNode = params->parentNode;
+   this->streamPort = params->streamPort;
    memset(&this->localNicCaps, 0, sizeof(this->localNicCaps) );
    memset(&this->stats, 0, sizeof(this->stats) );
    memset(&this->errState, 0, sizeof(this->errState) );
@@ -155,13 +159,10 @@ static bool NodeConnPool_loadRdmaNicStatsList(NodeConnPool* this)
    return true;
 }
 
-NodeConnPool* NodeConnPool_construct(struct App* app, struct Node* parentNode,
-   unsigned short streamPort, NicAddressList* nicList, NicAddressList* localRdmaNicList)
+NodeConnPool* NodeConnPool_construct(NodeConnPool_InitParams const *params)
 {
    NodeConnPool* this = (NodeConnPool*)os_kmalloc(sizeof(*this) );
-
-   NodeConnPool_init(this, app, parentNode, streamPort, nicList, localRdmaNicList);
-
+   NodeConnPool_init(this, params);
    return this;
 }
 
@@ -294,14 +295,45 @@ static NicAddressStats* NodeConnPool_rdmaNicPriority(NodeConnPool* this, DeviceP
    return min;
 }
 
-/**
- * Note: Will block if no stream socket is immediately available.
- *
- * @return connected socket; NULL on error or pending signal
- */
-Socket* NodeConnPool_acquireStreamSocket(NodeConnPool* this)
+static FhgfsOpsErr __NodeConnPool_sendHandshakeMsg(NodeConnPool* this, Socket* sock)
 {
-   return NodeConnPool_acquireStreamSocketEx(this, true, NULL);
+   Logger* log = App_getLogger(this->app);
+   const char* logContext = "NodeConnPool (send handshake msg)";
+   Node* node = this->parentNode;
+   FhgfsOpsErr requestRes;
+   HandshakeMsg msg;
+   RequestResponseArgs rrArgs;
+   NumNodeID localNodeNumID;
+
+   Logger_logFormatted(log, Log_DEBUG, logContext, "Sending Handshake message...");
+
+   // prepare and make request
+   localNodeNumID = Node_getNumID(App_getLocalNode(this->app) );
+   HandshakeMsg_initFromClientID(&msg, localNodeNumID);
+   RequestResponseArgs_prepare(&rrArgs, node, (NetMessage*)&msg, NETMSGTYPE_HandshakeResp);
+
+   // Bound the handshake recv to ~3s to stop client hang
+   rrArgs.recvTimeoutMS = 3000;
+
+   requestRes = MessagingTk_requestResponseWithRRArgsSock(this->app, &rrArgs, sock);
+
+   if (requestRes != FhgfsOpsErr_SUCCESS)
+   {
+      Logger_logFormatted(log, Log_DEBUG, logContext,
+         "Failed to send HandshakeMsg.");
+      return FhgfsOpsErr_COMMUNICATION;
+   }
+
+   //handle response
+   {
+      HandshakeRespMsg* respMsg = (HandshakeRespMsg*)rrArgs.outRespMsg;
+      requestRes = (FhgfsOpsErr)HandshakeRespMsg_getResult(respMsg);
+   }
+
+   // cleanup
+   RequestResponseArgs_freeRespBuffers(&rrArgs, this->app);
+
+   return requestRes;
 }
 
 /**
@@ -319,6 +351,8 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
    const char* logContext = "NodeConn (acquire stream)";
 
    Logger* log = App_getLogger(app);
+   Config* cfg = App_getConfig(app);
+
    NetFilter* netFilter = App_getNetFilter(app);
    NetFilter* tcpOnlyFilter = App_getTcpOnlyFilter(app);
 
@@ -646,7 +680,76 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
 
    Mutex_unlock(&this->mutex); // U N L O C K
 
+   if (sock && Config_getSysRemoteInvalEnabled(cfg) && Node_getNodeType(this->parentNode) == NODETYPE_Meta)
+   {
+      bool ok = false;
+      FhgfsOpsErr handshakeRes = __NodeConnPool_sendHandshakeMsg(this, sock);
+
+      if (handshakeRes == FhgfsOpsErr_SUCCESS)
+      {
+         ok = true;
+      }
+      else if (handshakeRes == FhgfsOpsErr_NOTSUPP)
+      {
+         Logger_logFormatted(log, Log_WARNING, logContext,
+               "InvalWatch handshake disabled in metadata node");
+         // We normally have to invalidate sockets that failed handshake, but
+         // this error code specifically indicates that caching is disabled in
+         // meta. This means InvalWatch will fail to create caching sessions
+         // anyway. We are safe to continue with the non-handshaked socket.
+         ok = true;
+      }
+      else if (handshakeRes == FhgfsOpsErr_COMMUNICATION)
+      {
+         // this can mean one of two things, we don't know which:
+         //  1. transient network error, couldn't reach meta.
+         //  2. meta doesn't know the RPC (meaning caching isn't available).
+         //
+         // Unfortunately metas do not send a proper "unknown RPC" error
+         // code in case of 2. So we can't tell the difference between 1 and 2.
+         // Because of that, there is a documented requirement for
+         // sysRemoteInvalEnabled = true that all metas must be upgraded. We
+         // will continue assuming case 1.
+         Logger_logFormatted(log, Log_WARNING, logContext,
+               "Handshake error code: %s. This can happen in case of network"
+               " problems or if meta is too old.",
+               FhgfsOpsErr_toErrString(handshakeRes));
+         ok = false;
+      }
+      else
+      {
+         Logger_logFormatted(log, Log_WARNING, logContext,
+               "Handshake error code: %s", FhgfsOpsErr_toErrString(handshakeRes));
+         ok = false;
+      }
+
+      if (ok)
+      {
+         // Because the system doesn't allow sending more than 1 message
+         // between acquire()/release(), we need to give back the
+         // now-handshaked socket and re-acquire (recursive call, but in some
+         // sense bounded because we made progress).
+         NodeConnPool_releaseStreamSocket(this, sock);
+         sock = NodeConnPool_acquireStreamSocketEx(this, allowWaiting, devPrioCtx);
+      }
+      else
+      {
+         __NodeConnPool_invalidateSpecificStreamSocket(this, sock);
+         sock = NULL;
+      }
+   }
+
    return sock;
+}
+
+/**
+ * Note: Will block if no stream socket is immediately available.
+ *
+ * @return connected socket; NULL on error or pending signal
+ */
+Socket* NodeConnPool_acquireStreamSocket(NodeConnPool* this)
+{
+   return NodeConnPool_acquireStreamSocketEx(this, true, NULL);
 }
 
 void NodeConnPool_releaseStreamSocket(NodeConnPool* this, Socket* sock)

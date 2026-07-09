@@ -17,6 +17,7 @@
 #include <common/toolkit/MetadataTk.h>
 #include <common/toolkit/tree/IntMapIter.h>
 #include <filesystem/FhgfsInode.h>
+#include <components/InvalReader.h>
 #include <net/filesystem/RemotingIOInfo.h>
 #include <toolkit/BitStore.h>
 #include <os/OsCompat.h>
@@ -38,12 +39,13 @@
 #define BEEGFS_VFSINODE(fhgfsInodePointer)    ( (struct inode*)fhgfsInodePointer)
 
 
-#define BEEGFS_INODE_FLAG_WRITE_ERROR         1 // there was a write error with this inode
+#define BEEGFS_INODE_BIT_WRITE_ERROR         0 // there was a write error with this inode
                                                // if set switches to sync writes to faster notify
                                                // applications
-#define BEEGFS_INODE_FLAG_PAGED               2 // the inode was written to from page functions
+#define BEEGFS_INODE_BIT_PAGED               1 // the inode was written to from page functions
+#define BEEGFS_INODE_BIT_METADATA_VALID      2 // cached metadata is considered valid
 
-#define BEEGFS_INODE_FLAG_PATTERN_STALE       3 // the stripe pattern has changed and should update
+#define BEEGFS_INODE_BIT_PATTERN_STALE       3 // the stripe pattern has changed and should update
 
 struct StripePattern; // forward declaration
 
@@ -127,8 +129,14 @@ extern void FhgfsInode_addRangeLockPID(FhgfsInode* this, int pid);
 extern uint64_t FhgfsInode_generateInodeID(struct super_block* sb, const char* entryID,
    int entryIDLen);
 
-extern bool FhgfsInode_isCacheValid(FhgfsInode* this, umode_t i_mode, Config* cfg);
+extern struct inode* FhgfsInode_GetInodeFromEntryID(struct super_block *sb, char *entryID);
+extern unsigned FhgfsInode_getCacheValidityMS(umode_t i_mode, Config* cfg);
 
+extern bool FhgfsInode_isCacheValid(FhgfsInode* this, umode_t i_mode, Config* cfg);
+extern void FhgfsInode_setCacheValid(FhgfsInode* this);
+extern void FhgfsInode_setCacheValidUnlocked(FhgfsInode* this); //caller must already hold entryInfoLock
+extern void FhgfsInode_setParentInfo(FhgfsInode* this, NumNodeID parentNodeID);
+extern void FhgfsInode_setLocalSessionCnt(FhgfsInode* this);
 
 // private extern
 
@@ -293,6 +301,8 @@ struct FhgfsInode
    uint32_t metaVersion;  /* protected by entryInfoLock (which would subsume a more granular lock).
                           used as a way to invalidate the cache due to internal metadata changes 
                           (like stripe pattern change) via lookup::revalidateIntent. */
+   int32_t localSessionCnt; /* Metadata gen inode is aware of .Used during inode cache validation check
+                          to know if meta has been rebooted and inode cache might be stale. */
    atomic_t modified; // tracks whether the inode data has been written since its last full flush
    atomic_t coRWInProg; //Coherent read/write in progress.
    #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)      /* >= 6.3 */
@@ -300,8 +310,28 @@ struct FhgfsInode
    #elif defined(KERNEL_HAS_USER_NS_MOUNTS)    /* 5.15–6.2 */
     struct user_namespace *mnt_userns;      /* always non-NULL; default &init_user_ns */
    #endif
+
+   struct BeeGFSNFS4AclCache __rcu *nfs4_acl_cache; /* RCU-protected per-inode NFS4 ACL cache */
 };
 
+// New API for asynchronous cache invalidation
+// Note: all these cache-invalidation functions are not really synchronized.
+// Also, a lot of the code reading metadata from inodes is probably not well protected...
+
+static inline bool FhgfsInode_isValid(FhgfsInode* this)
+{
+   return test_bit(BEEGFS_INODE_BIT_METADATA_VALID, &this->flags);
+}
+
+static inline void FhgfsInode_invalidate(FhgfsInode* this)
+{
+   clear_bit(BEEGFS_INODE_BIT_METADATA_VALID, &this->flags);
+}
+
+static inline void FhgfsInode_setValid(FhgfsInode* this)
+{
+   set_bit(BEEGFS_INODE_BIT_METADATA_VALID, &this->flags);
+}
 
 int FhgfsInode_getNumRangeLockPIDs(FhgfsInode* this)
 {
@@ -579,12 +609,12 @@ int FhgfsInode_handleTypeToOpenFlags(FileHandleType handleType)
       } break;
    }
 }
-
 /**
  * Invalidate the cache of an inode
  */
 void FhgfsInode_invalidateCache(FhgfsInode* this)
 {
+   clear_bit(BEEGFS_INODE_BIT_METADATA_VALID, &this->flags);
    Time_setZero(&this->dataCacheTime);
 }
 
@@ -732,13 +762,7 @@ void FhgfsInode_initIsizeHints(FhgfsInode* this, FhgfsIsizeHints* outISizeHints)
  */
 void FhgfsInode_setPageWriteFlag(FhgfsInode* this)
 {
-   /* Note: This is called for each an every page (in paged mode, mmap, splice, ...)
-    *       and therefore a very hot path and therefore needs to be optimized.
-    *       Mostly the read will succeed if there are paged writes and the read will only fail
-    *       for the first inode. And as reading values is cheaper than writing values, we first
-    *       check if the flag is already set */
-   if (!FhgfsInode_getHasPageWriteFlag(this) )
-      set_bit(BEEGFS_INODE_FLAG_PAGED, &this->flags);
+   set_bit(BEEGFS_INODE_BIT_PAGED, &this->flags);
 }
 
 /**
@@ -750,7 +774,7 @@ void FhgfsInode_setPageWriteFlag(FhgfsInode* this)
  */
 int FhgfsInode_getHasPageWriteFlag(FhgfsInode* this)
 {
-   return test_bit(BEEGFS_INODE_FLAG_PAGED, &this->flags);
+   return test_bit(BEEGFS_INODE_BIT_PAGED, &this->flags);
 }
 
 /**
@@ -758,7 +782,7 @@ int FhgfsInode_getHasPageWriteFlag(FhgfsInode* this)
  */
 void FhgfsInode_setWritePageError(FhgfsInode* this)
 {
-   return set_bit(BEEGFS_INODE_FLAG_WRITE_ERROR, &this->flags);
+   set_bit(BEEGFS_INODE_BIT_WRITE_ERROR, &this->flags);
 }
 
 /**
@@ -766,13 +790,12 @@ void FhgfsInode_setWritePageError(FhgfsInode* this)
  */
 void FhgfsInode_clearWritePageError(FhgfsInode* this)
 {
-   return clear_bit(BEEGFS_INODE_FLAG_WRITE_ERROR, &this->flags);
-
+   clear_bit(BEEGFS_INODE_BIT_WRITE_ERROR, &this->flags);
 }
 
 int FhgfsInode_getHasWritePageError(FhgfsInode* this)
 {
-   return test_bit(BEEGFS_INODE_FLAG_WRITE_ERROR, &this->flags);
+   return test_bit(BEEGFS_INODE_BIT_WRITE_ERROR, &this->flags);
 }
 
 
@@ -781,7 +804,7 @@ int FhgfsInode_getHasWritePageError(FhgfsInode* this)
  */
 void FhgfsInode_setStripePatternStale(FhgfsInode* this)
 {
-   set_bit(BEEGFS_INODE_FLAG_PATTERN_STALE, &this->flags);
+   set_bit(BEEGFS_INODE_BIT_PATTERN_STALE, &this->flags);
 }
 
 /**
@@ -789,12 +812,12 @@ void FhgfsInode_setStripePatternStale(FhgfsInode* this)
  */
 void FhgfsInode_clearStripePatternStaleFlag(FhgfsInode* this)
 {
-   clear_bit(BEEGFS_INODE_FLAG_PATTERN_STALE, &this->flags);
+   clear_bit(BEEGFS_INODE_BIT_PATTERN_STALE, &this->flags);
 }
 
 bool FhgfsInode_isStripePatternStale(FhgfsInode* this)
 {
-   return test_bit(BEEGFS_INODE_FLAG_PATTERN_STALE, &this->flags);
+   return test_bit(BEEGFS_INODE_BIT_PATTERN_STALE, &this->flags);
 }
 
 /* ------------------------------------------------------------------------

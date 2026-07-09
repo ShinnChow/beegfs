@@ -709,14 +709,37 @@ int FhgfsOps_set_acl(struct inode* inode, struct posix_acl* acl, int type)
 
    if (acl)
    {
+      struct user_namespace *userns;
+
+      #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
+      userns = inode->i_sb->s_user_ns;
+      #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
+      userns = mnt_userns;
+      #else
+      userns = &init_user_ns;
+      #endif
+
       // prepare extended attribute - determine size needed for buffer.
-#if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
-      xAttrBufLen = os_posix_acl_to_xattr(inode->i_sb->s_user_ns, acl, NULL, 0);
-#elif defined(KERNEL_HAS_USER_NS_MOUNTS)
-      xAttrBufLen = os_posix_acl_to_xattr(mnt_userns, acl, NULL, 0);
+#if defined(KERNEL_HAS_POSIX_ACL_TO_XATTR_ALLOC)
+      size_t xAttrBufSize = 0;
+
+      /*
+       * Newer kernels allocate and fill the xattr buffer inside
+       * posix_acl_to_xattr(), so this path intentionally skips os_kmalloc().
+       */
+      xAttrBuf = os_posix_acl_to_xattr(userns, acl, &xAttrBufSize, GFP_NOFS);
+      if (!xAttrBuf)
+         return -ENOMEM;
+
+      if (xAttrBufSize > INT_MAX)
+      {
+         res = -EOVERFLOW;
+         goto cleanup;
+      }
+
+      xAttrBufLen = (int)xAttrBufSize;
 #else
-      xAttrBufLen = os_posix_acl_to_xattr(&init_user_ns, acl, NULL, 0);
-#endif
+      xAttrBufLen = os_posix_acl_to_xattr(userns, acl, NULL, 0);
 
       if (xAttrBufLen < 0)
          return xAttrBufLen;
@@ -725,16 +748,11 @@ int FhgfsOps_set_acl(struct inode* inode, struct posix_acl* acl, int type)
       if (!xAttrBuf)
          return -ENOMEM;
 
-#if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
-      res = os_posix_acl_to_xattr(inode->i_sb->s_user_ns, acl, xAttrBuf, xAttrBufLen);
-#elif defined(KERNEL_HAS_USER_NS_MOUNTS)
-      res = os_posix_acl_to_xattr(mnt_userns, acl, xAttrBuf, xAttrBufLen);
-#else
-      res = os_posix_acl_to_xattr(&init_user_ns, acl, xAttrBuf, xAttrBufLen);
-#endif
+      res = os_posix_acl_to_xattr(userns, acl, xAttrBuf, xAttrBufLen);
       if (res != xAttrBufLen)
          goto cleanup;
 
+#endif
       FhgfsInode_entryInfoReadLock(fhgfsInode);
 
       remotingRes = FhgfsOpsRemoting_setXAttr(app, entryInfo, xAttrName, xAttrBuf, xAttrBufLen, 0);
@@ -1028,8 +1046,13 @@ void FhgfsOps_newAttrToInode(struct iattr* iAttr, struct inode* outInode)
  * Create directory.
  */
 #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
+#if defined(KERNEL_HAS_MKDIR_RET_DENTRY)
+struct dentry* FhgfsOps_mkdir(struct mnt_idmap* idmap, struct inode* dir,
+   struct dentry* dentry, umode_t mode)
+#else
 int FhgfsOps_mkdir(struct mnt_idmap* idmap, struct inode* dir, struct dentry* dentry,
    umode_t mode)
+#endif
 #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
 int FhgfsOps_mkdir(struct user_namespace* mnt_userns, struct inode* dir, struct dentry* dentry,
    umode_t mode)
@@ -1103,7 +1126,24 @@ int FhgfsOps_mkdir(struct inode* dir, struct dentry* dentry, int mode)
 
    FileEvent_uninit(&event);
 
+#if defined(KERNEL_HAS_IDMAPPED_MOUNTS) && defined(KERNEL_HAS_MKDIR_RET_DENTRY)
+   /*
+    * See Linux VFS mkdir API change:
+    * https://git.zx2c4.com/linux-rng/commit/?id=88d5baf69082e5b410296435008329676b687549
+    *
+    * For the new VFS contract:
+    * NULL means success, original dentry was used.
+    * ERR_PTR(err) means error.
+    * non-NULL dentry means success, but filesystem used/spliced a different dentry.
+    * We instantiate the VFS-provided dentry above, so success must return NULL.
+    */
+   if (retVal)
+      return ERR_PTR(retVal);
+
+   return NULL;
+#else
    return retVal;
+#endif
 }
 
 int FhgfsOps_rmdir(struct inode* dir, struct dentry* dentry)
@@ -1278,16 +1318,22 @@ int FhgfsOps_createIntent(struct inode* dir, struct dentry* dentry, int createMo
       goto outErr;
    }
 
-   if(unlikely(
-      lookupOutInfo.stripePattern &&
-      (StripePattern_getPatternType(lookupOutInfo.stripePattern) == STRIPEPATTERN_Invalid) ) )
-   { // unknown/invalid stripe pattern
-      Logger_logErrFormatted(log, logContext, "Entry has invalid/unknown stripe pattern type: %s",
-         createInfo.entryName);
+   if(likely(lookupOutInfo.stripePattern))
+   { /* check stripe pattern validity; evaluate targets once to safely handle any
+      * pattern type that might return NULL from getStripeTargetIDs in the future */
+      UInt16Vec* patternTargets = lookupOutInfo.stripePattern->getStripeTargetIDs(lookupOutInfo.stripePattern);
+      size_t numPatternTargets = patternTargets ? UInt16Vec_length(patternTargets) : 0;
+      if(unlikely(
+         StripePattern_getPatternType(lookupOutInfo.stripePattern) == STRIPEPATTERN_Invalid ||
+         numPatternTargets == 0) )
+      { // unknown/invalid stripe pattern, or valid-typed but empty target list
+         Logger_logErrFormatted(log, logContext, "Entry has invalid/unknown stripe pattern type: %s",
+            createInfo.entryName);
 
-      d_drop(dentry); // avoid leaving a negative dentry behind
-      retVal = FhgfsOpsErr_toSysErr(FhgfsOpsErr_INTERNAL);
-      goto outErr;
+         d_drop(dentry); // avoid leaving a negative dentry behind
+         retVal = FhgfsOpsErr_toSysErr(FhgfsOpsErr_INTERNAL);
+         goto outErr;
+      }
    }
 
    // remote success => create local inode
@@ -1575,8 +1621,13 @@ int FhgfsOps_atomicOpen(struct inode* dir, struct dentry* dentry, struct file* f
 
    // remote open success
 
-   file->f_path.dentry = dentry; /* Assign the dentry, finish open does that, but we
-                                  * already need it in openReferenceHandle() */
+#ifdef KERNEL_HAS_FILE__F_PATH
+   file->__f_path.dentry = dentry; /* finish_open() updates f_path, but we already need
+                                    * the dentry in openReferenceHandle() */
+#else
+   file->f_path.dentry = dentry; /* finish_open() updates f_path, but we already need
+                                  * the dentry in openReferenceHandle() */
+#endif
 
    newInode = dentry->d_inode;
 
@@ -2323,6 +2374,9 @@ int FhgfsOps_rename(struct inode* inodeDirFrom, struct dentry* dentryFrom,
       inode_set_ctime_to_ts(fromEntryInode, ts);
 
       FhgfsInode_updateEntryInfoOnRenameUnlocked(fhgfsFromEntryInode, toDirInfo, newName);
+      //set inode as valid after update
+      FhgfsInode_setCacheValidUnlocked(fhgfsFromEntryInode); //entryInfoLock already held
+
    }
 
    FhgfsInode_entryInfoWriteUnlock(fhgfsFromEntryInode);   // UNLOCK EntryInfo (renamed file dir)
@@ -2511,7 +2565,11 @@ struct inode* __FhgfsOps_newInodeWithParentID(struct super_block* sb, struct kst
    fhgfsInode->mnt_userns = &init_user_ns;
    #endif
 
-   if( !(inode->i_state & I_NEW) )
+   #ifdef KERNEL_HAS_INODE_STATE_READ_ONCE
+   if (!(inode_state_read_once(inode) & I_NEW))
+   #else
+   if (!(inode->i_state & I_NEW))
+   #endif
    {  // Found an existing inode, which is possibly actively used. We still need to update it.
       FhgfsInode_entryInfoWriteLock(fhgfsInode); // LOCK EntryInfo
 
@@ -2526,11 +2584,16 @@ struct inode* __FhgfsOps_newInodeWithParentID(struct super_block* sb, struct kst
       Time_setToNow(&fhgfsInode->dataCacheTime);
       spin_unlock(&inode->i_lock);
 
+      //set inode as valid after update
+      if (!FhgfsInode_isCacheValid(fhgfsInode, inode->i_mode, cfg))
+      {
+         FhgfsInode_setCacheValid(fhgfsInode);
+      }
+
       goto outNoCleanUp; // we found a matching existing inode => no init needed
    }
 
-   fhgfsInode->parentNodeID = parentNodeID;
-
+   FhgfsInode_setParentInfo(fhgfsInode, parentNodeID);
    /* note: new inodes are protected by the I_NEW flag from access by other threads until we
     *       call unlock_new_inode(). */
 
@@ -2597,7 +2660,8 @@ struct inode* __FhgfsOps_newInodeWithParentID(struct super_block* sb, struct kst
          init_special_inode(inode, kstat->mode, dev);
       } break;
    }
-
+   //set new inode to valid
+   FhgfsInode_setCacheValid(fhgfsInode);
 
    unlock_new_inode(inode); // remove I_NEW flag, so the inode can be accessed by others
 
@@ -2877,7 +2941,11 @@ int __FhgfsOps_doRefreshInode(App* app, struct inode* inode, fhgfs_stat* fhgfsSt
    if(inode->i_ino == BEEGFS_INODE_ROOT_INO)
    { // root node deserves special handling (less checking)
       __FhgfsOps_applyStatDataToInode(&kstat, NULL, inode);
-
+      //set inode as valid after update
+      if (!FhgfsInode_isCacheValid(fhgfsInode, inode->i_mode, app->cfg))
+      {
+         FhgfsInode_setCacheValid(fhgfsInode);
+      }
       goto cleanup;
    }
 
@@ -2945,6 +3013,12 @@ int __FhgfsOps_doRefreshInode(App* app, struct inode* inode, fhgfs_stat* fhgfsSt
 
    Time_setToNow(&fhgfsInode->dataCacheTime); 
    spin_unlock(&inode->i_lock); // I _ U N L O C K
+
+   //set inode as valid after update
+   if (!FhgfsInode_isCacheValid(fhgfsInode, inode->i_mode, cfg))
+   {
+      FhgfsInode_setCacheValid(fhgfsInode);
+   }
 
    // drop ACL caches as ACLs might have been updated
    if (Config_getSysACLsRevalidate(cfg) == ACLSREVALIDATE_Cache) {

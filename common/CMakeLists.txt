@@ -358,7 +358,6 @@ add_library(
 	./source/common/logging/Backtrace.h
 	./source/common/components/AbstractDatagramListener.h
 	./source/common/components/ComponentInitException.h
-	./source/common/components/StreamListener.h
 	./source/common/components/RegistrationDatagramListener.h
 	./source/common/components/RegistrationDatagramListener.cpp
 	./source/common/components/StatsCollector.h
@@ -382,14 +381,12 @@ add_library(
 	./source/common/components/worker/LocalConnWorker.cpp
 	./source/common/components/worker/DecAtomicWork.cpp
 	./source/common/components/worker/IncAtomicWork.h
-	./source/common/components/worker/IncomingDataWork.h
 	./source/common/components/worker/Worker.cpp
 	./source/common/components/worker/WriteLocalFileWork.cpp
 	./source/common/components/worker/Worker.h
 	./source/common/components/worker/ReadLocalFileV2Work.cpp
 	./source/common/components/worker/DummyWork.h
 	./source/common/components/worker/IncAtomicWork.cpp
-	./source/common/components/worker/IncomingDataWork.cpp
 	./source/common/components/worker/DecAtomicWork.h
 	./source/common/components/worker/LocalConnWorker.h
 	./source/common/components/TimerQueue.cpp
@@ -399,7 +396,6 @@ add_library(
 	./source/common/components/streamlistenerv2/StreamListenerV2.h
 	./source/common/components/streamlistenerv2/ConnAcceptor.h
 	./source/common/components/streamlistenerv2/IncomingPreprocessedMsgWork.h
-	./source/common/components/StreamListener.cpp
 	./source/common/components/AbstractDatagramListener.cpp
 	./source/common/system/System.cpp
 	./source/common/system/System.h
@@ -408,9 +404,9 @@ add_library(
 	./source/common/app/log/Logger.h
 	./source/common/app/AbstractApp.cpp
 	./source/common/app/AbstractApp.h
-	./source/common/app/config/ICommonConfig.h
+	./source/common/app/config/CommonConfig.h
+	./source/common/app/config/CommonConfig.cpp
 	./source/common/app/config/InvalidConfigException.h
-	./source/common/app/config/ICommonConfig.cpp
 	./source/common/app/config/AbstractConfig.cpp
 	./source/common/app/config/AbstractConfig.h
 	./source/common/threading/UniqueRWLock.h

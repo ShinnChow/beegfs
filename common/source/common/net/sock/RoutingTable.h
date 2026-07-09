@@ -46,7 +46,7 @@ class RoutingTable
        * @return true if a route was found for addr and it matches an element of
        *    nicList.
        */
-      BEEGFS_NODISCARD bool match(const IPAddress& addr, const NicAddressList& nicList, IPAddress& src) const;
+      [[nodiscard]] bool match(const IPAddress& addr, const NicAddressList& nicList, IPAddress& src) const;
 
       /**
        * Populate srcMap with the local IP address to use when communicating with IP addresses specified in
@@ -56,7 +56,7 @@ class RoutingTable
        * @param localNicList the NicAdderess instances to route from (i.e. local IPs)
        * @return true if at least one route is found to the IPs in nicList.
        */
-      BEEGFS_NODISCARD bool loadIpSourceMap(const NicAddressList& nicList, const NicAddressList& localNicList,
+      [[nodiscard]] bool loadIpSourceMap(const NicAddressList& nicList, const NicAddressList& localNicList,
          IpSourceMap &srcMap) const;
 
 };

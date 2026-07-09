@@ -282,7 +282,18 @@ FhgfsOpsErr BuddyResyncerDirSyncSlave::findChunks(uint16_t targetID, const std::
             // dir not found, so we didn't know about it yet => add it to sync candidate store, so
             // that it gets checked and we get a list of its contents;
             ChunkSyncCandidateDir syncCandidate(entryPath, targetID);
-            syncCandidates->add(syncCandidate, this);
+            syncCandidates->add(syncCandidate, this,
+               [&entryPath, targetID](unsigned waitedMS, unsigned queueLen, unsigned queueLimit)
+               {
+                  LogContext("BuddyResyncerDirSyncSlave").log(Log_WARNING,
+                     "Possible deadlock detected while adding directory candidate to queue for targetID "
+                     + StringTk::uintToStr(targetID)
+                     + "; entryPath: " + entryPath
+                     + "; waitedMS: " + StringTk::uintToStr(waitedMS)
+                     + "; queuedEntries: " + StringTk::uintToStr(queueLen)
+                     + "; queueLimit: " + StringTk::uintToStr(queueLimit)
+                     + "; (hint: try increasing tuneResyncQueueLimit)");
+               });
             numAdditionalDirsMatched.increase();
          }
 

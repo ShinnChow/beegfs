@@ -11,7 +11,9 @@
 #include <common/toolkit/NodesTk.h>
 #include <common/toolkit/Random.h>
 #include <common/toolkit/Time.h>
+#include <components/InvalReader.h>
 #include "InternodeSyncer.h"
+#include "app/log/Logger.h"
 
 
 void InternodeSyncer_init(InternodeSyncer* this, App* app)
@@ -30,6 +32,8 @@ void InternodeSyncer_init(InternodeSyncer* this, App* app)
    this->metaNodes = App_getMetaNodes(app);
    this->storageNodes = App_getStorageNodes(app);
 
+   this->waitForMgmtLogged = false;
+   this->registrationFailureLogged = false;
    this->nodeRegistered = false;
    this->mgmtInitDone = false;
 
@@ -143,9 +147,12 @@ void __InternodeSyncer_run(Thread* this)
 
 void _InternodeSyncer_requestLoop(InternodeSyncer* this)
 {
+   const char* logContext = "Init";
+   Logger* log = App_getLogger(this->app);
+
    const unsigned sleepTimeMS = 5*1000;
 
-   const unsigned mgmtInitIntervalMS = 5000;
+   unsigned mgmtInitIntervalMS = 5000;
    const unsigned reregisterIntervalMS = 60*1000; /* send heartbeats to mgmt in this interval. must
       be a lot lower than tuneClientAutoRemoveMins of mgmt. the value is capped to at least 5
       (or disabled) on mgmt. */
@@ -189,6 +196,13 @@ void _InternodeSyncer_requestLoop(InternodeSyncer* this)
          {
             __InternodeSyncer_mgmtInit(this);
 
+            // exponential mount contact retry backoff until we only try ~every 10 minutes
+            if (mgmtInitIntervalMS < 600000)
+               mgmtInitIntervalMS *= 2;
+
+            Logger_logFormatted(log, Log_WARNING, logContext,
+                                "Not registered with management yet. Will retry in %u s.",
+                                mgmtInitIntervalMS / 1000);
             Time_setToNow(&lastMgmtInitT);
          }
 
@@ -265,39 +279,37 @@ void __InternodeSyncer_signalMgmtInitDone(InternodeSyncer* this)
 
 void __InternodeSyncer_mgmtInit(InternodeSyncer* this)
 {
-   static bool waitForMgmtLogged = false; // to avoid log spamming
-
    const char* logContext = "Init";
    Logger* log = App_getLogger(this->app);
 
-   if(!waitForMgmtLogged)
+   if(!this->waitForMgmtLogged)
    {
       const char* hostname = Config_getSysMgmtdHost(this->cfg);
       unsigned short port = Config_getConnMgmtdPort(this->cfg);
 
       Logger_logFormatted(log, Log_WARNING, logContext,
          "Waiting for beegfs-mgmtd@%s:%hu...", hostname, port);
-      waitForMgmtLogged = true;
+      this->waitForMgmtLogged = true;
    }
 
-   if(!__InternodeSyncer_waitForMgmtHeartbeat(this) )
+   if(!__InternodeSyncer_waitForMgmtHeartbeat(this) ) {
+      Logger_log(log, Log_WARNING, logContext, "Management node didn't respond. Is it up and reachable?");
       return;
+   }
 
-   Logger_log(log, Log_NOTICE, logContext, "Management node found. Downloading node groups...");
-
-   __InternodeSyncer_downloadAndSyncNodes(this);
-   __InternodeSyncer_downloadAndSyncTargetMappings(this);
-   __InternodeSyncer_updateTargetStatesAndBuddyGroups(this, NODETYPE_Storage);
-   __InternodeSyncer_updateTargetStatesAndBuddyGroups(this, NODETYPE_Meta);
-
-   Logger_log(log, Log_NOTICE, logContext, "Node registration...");
+   Logger_log(log, Log_NOTICE, logContext, "Management node found. Starting node registration...");
 
    if(__InternodeSyncer_registerNode(this) )
-   { // download nodes again now that we will receive notifications about add/remove (avoids race)
+   {
       __InternodeSyncer_downloadAndSyncNodes(this);
       __InternodeSyncer_downloadAndSyncTargetMappings(this);
       __InternodeSyncer_updateTargetStatesAndBuddyGroups(this, NODETYPE_Storage);
       __InternodeSyncer_updateTargetStatesAndBuddyGroups(this, NODETYPE_Meta);
+   }
+   else
+   {
+      // registration failed, return to be potentially retried based on sanity check configuration
+      return;
    }
 
    __InternodeSyncer_signalMgmtInitDone(this);
@@ -383,8 +395,6 @@ bool __InternodeSyncer_waitForMgmtHeartbeat(InternodeSyncer* this)
  */
 bool __InternodeSyncer_registerNode(InternodeSyncer* this)
 {
-   static bool registrationFailureLogged = false; // to avoid log spamming
-
    const char* logContext = "Registration";
    Config* cfg = App_getConfig(this->app);
    Logger* log = App_getLogger(this->app);
@@ -429,8 +439,6 @@ bool __InternodeSyncer_registerNode(InternodeSyncer* this)
    // handle result
    registerResp = (RegisterNodeRespMsg*)respMsg;
    newLocalNodeNumID = RegisterNodeRespMsg_getNodeNumID(registerResp);
-   Config_setConnMgmtdGrpcPort(cfg, RegisterNodeRespMsg_getGrpcPort(registerResp));
-   App_updateFsUUID(this->app, RegisterNodeRespMsg_getFsUUID(registerResp));
 
    if (newLocalNodeNumID.value == 0)
    {
@@ -440,6 +448,8 @@ bool __InternodeSyncer_registerNode(InternodeSyncer* this)
    else
    {
       Node_setNumID(localNode, newLocalNodeNumID);
+      Config_setConnMgmtdGrpcPort(cfg, RegisterNodeRespMsg_getGrpcPort(registerResp));
+      App_updateFsUUID(this->app, RegisterNodeRespMsg_getFsUUID(registerResp));
 
       this->nodeRegistered = true;
    }
@@ -453,13 +463,17 @@ cleanup_request:
 
    // log registration result
    if(this->nodeRegistered)
-      Logger_log(log, Log_WARNING, logContext, "Node registration successful.");
-   else
-   if(!registrationFailureLogged)
+   {
+      Logger_log(log, Log_NOTICE, logContext, "Node registration successful.");
+      // reset registrationFailureLogged just in case we had set it to cover cases where we
+      // successfully register after initial failure (mgmtd restarts, etc.)
+      this->registrationFailureLogged = false;
+   }
+   else if(!this->registrationFailureLogged)
    {
       Logger_log(log, Log_CRITICAL, logContext,
-         "Node registration failed. Management node offline? Will keep on trying...");
-      registrationFailureLogged = true;
+                 "Node registration failed. Check management log file for details");
+      this->registrationFailureLogged = true;
    }
 
    result = this->nodeRegistered;
@@ -640,6 +654,10 @@ void __InternodeSyncer_downloadAndSyncNodes(InternodeSyncer* this)
       NodeStoreEx_syncNodes(this->metaNodes,
          &metaNodesList, &addedMetaNodes, &removedMetaNodes, localNode);
       NodeStoreEx_setRootOwner(this->metaNodes, rootOwner, false);
+      if (this->app->invalReader)
+      {
+         InvalReader_updateMetaNodes(this->app->invalReader, &addedMetaNodes, &removedMetaNodes);
+      }
       __InternodeSyncer_printSyncResults(this, NODETYPE_Meta, &addedMetaNodes, &removedMetaNodes);
    }
 
@@ -755,8 +773,61 @@ void __InternodeSyncer_updateTargetStatesAndBuddyGroups(InternodeSyncer* this, N
 
    if(downloadRes)
    {
+      if (nodeType == NODETYPE_Meta && this->app->invalReader)
+      {
+         struct TargetStateMapping* stateMap;
+
+         /*
+         * handling of the reachability transition case,
+         * thread was shutdown due to node being offline,
+         * but now the node is ONLINE again.
+         */
+         list_for_each_entry(stateMap, &states, _list)
+         {
+            CombinedTargetState oldState;
+            bool hadOldState = TargetStateStore_getState(targetStateStore,
+               stateMap->targetID, &oldState);
+
+            if (stateMap->reachabilityState == TargetReachabilityState_ONLINE &&
+               (!hadOldState || oldState.reachabilityState != TargetReachabilityState_ONLINE))
+            {
+               InvalReader_startMetaThread(this->app->invalReader,
+                  (NumNodeID){ stateMap->targetID });
+            }
+         }
+      }
+
       TargetStateStore_syncStatesAndGroupsFromLists(targetStateStore, this->app->cfg,
          buddyGroupMapper, &states, &buddyGroups);
+
+      if (nodeType == NODETYPE_Meta && this->app->invalReader)
+      {
+         struct BuddyGroupMapping* groupMap;
+
+         /*
+         * Handling of primary/secondary failover,
+         * Shutdown any threads going to secondary buddy
+         * Start thread to any new primary buddy
+         */
+         list_for_each_entry(groupMap, &buddyGroups, _list)
+         {
+            CombinedTargetState primaryState;
+            bool havePrimaryState;
+
+            InvalReader_stopMetaThread(this->app->invalReader,
+               (NumNodeID){ groupMap->secondaryTargetID });
+
+            havePrimaryState = TargetStateStore_getState(targetStateStore,
+               groupMap->primaryTargetID, &primaryState);
+
+            if (havePrimaryState &&
+               primaryState.reachabilityState == TargetReachabilityState_ONLINE)
+            {
+               InvalReader_startMetaThread(this->app->invalReader,
+                  (NumNodeID){ groupMap->primaryTargetID });
+            }
+         }
+      }
 
       Time_setToNow(&this->lastSuccessfulTargetStatesUpdateT);
       Logger_logFormatted(log, Log_DEBUG, logContext, "%s states synced.",
@@ -1219,3 +1290,25 @@ unsigned __InternodeSyncer_dropIdleConnsByStore(InternodeSyncer* this, NodeStore
    return numDroppedConns;
 }
 
+#if 0
+NumNodeID *InternodeSyncer_GetMetaNodeNumIDs(InternodeSyncer* this, unsigned *nMetas)
+{
+
+   NodeStoreEx* nodes = App_getMetaNodes(this->app);
+   unsigned m = NodeStoreEx_getSize(nodes);
+   NumNodeID *metaIDs = (NumNodeID*)os_kmalloc(sizeof(NumNodeID) * m);
+   unsigned i = 0;
+
+   Node* node = NodeStoreEx_referenceFirstNode(nodes);
+   while(node)
+   {
+      metaIDs[i] = node->numID;
+
+      node = NodeStoreEx_referenceNextNodeAndReleaseOld(nodes, node); // iterate to next node
+      i++;
+   }
+   *nMetas = m;
+
+   return metaIDs;
+}
+#endif

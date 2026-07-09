@@ -73,6 +73,10 @@ inline std::string netMessageTypeToStr(int type)
       case NETMSGTYPE_RefreshStoragePools: return "RefreshStoragePools (1070)";
       case NETMSGTYPE_RemoveStoragePool: return "RemoveStoragePool (1071)";
       case NETMSGTYPE_RemoveStoragePoolResp: return "RemoveStoragePoolResp (1072)";
+      case NETMSGTYPE_Handshake: return "Handshake (1073)";
+      case NETMSGTYPE_HandshakeResp: return "HandshakeResp (1074)";
+      case NETMSGTYPE_ReadInvalidations: return "ReadInvalidations (1075)";
+      case NETMSGTYPE_ReadInvalidationsResp: return "ReadInvalidationsResp (1076)";
       case NETMSGTYPE_MkDir: return "MkDir (2001)";
       case NETMSGTYPE_MkDirResp: return "MkDirResp (2002)";
       case NETMSGTYPE_RmDir: return "RmDir (2003)";

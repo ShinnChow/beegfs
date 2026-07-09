@@ -209,7 +209,7 @@ class App : public AbstractApp
       }
 
       // getters & setters
-      virtual const ICommonConfig* getCommonConfig() const override
+      virtual const CommonConfig* getCommonConfig() const override
       {
          return cfg;
       }

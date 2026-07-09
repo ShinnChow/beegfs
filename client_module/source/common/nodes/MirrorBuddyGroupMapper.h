@@ -31,6 +31,8 @@ extern FhgfsOpsErr MirrorBuddyGroupMapper_addGroup(MirrorBuddyGroupMapper* this,
    Config* config, TargetMapper* targetMapper, uint16_t buddyGroupID, uint16_t primaryTargetID,
    uint16_t secondaryTargetID, bool allowUpdate);
 
+extern uint16_t MirrorBuddyGroupMapper_getBuddyGroupID(MirrorBuddyGroupMapper* this,
+   uint16_t targetID);
 extern uint16_t __MirrorBuddyGroupMapper_getBuddyGroupIDUnlocked(MirrorBuddyGroupMapper* this,
    uint16_t targetID);
 extern void __MirrorBuddyGroupMapper_syncGroupsUnlocked(MirrorBuddyGroupMapper* this,

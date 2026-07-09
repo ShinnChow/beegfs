@@ -1,6 +1,7 @@
 #include <common/threading/UniqueRWLock.h>
 #include <common/threading/RWLockGuard.h>
 #include <program/Program.h>
+#include <components/InvalWatch.h>
 #include "InodeFileStore.h"
 
 
@@ -242,6 +243,7 @@ unsigned InodeFileStore::decreaseInodeRefCountUnlocked(InodeMapIter& iter)
 bool InodeFileStore::closeFile(EntryInfo* entryInfo, FileInode* inode, unsigned accessFlags,
    unsigned* outNumHardlinks, unsigned* outNumRefs, bool& outLastWriterClosed)
 {
+   const bool wasReadOnly = (accessFlags & OPENFILE_ACCESS_MASK_RW) == OPENFILE_ACCESS_READ;
    RWLockGuard lock(rwlock, SafeRWLock_WRITE);
 
    *outNumHardlinks = 1; // (we're careful here about inodes that are not currently open)
@@ -265,6 +267,15 @@ bool InodeFileStore::closeFile(EntryInfo* entryInfo, FileInode* inode, unsigned 
          outLastWriterClosed = true;
 
       *outNumRefs = decreaseInodeRefCountUnlocked(iter);
+
+      
+      // Skip InvalWatch trigger for read-only closes. Read-only access does not
+      // change inode data or attributes; other watchers have nothing to invalidate.
+      if (!wasReadOnly)
+      {
+         // Trigger InvalWatch invalidation event
+         invalidate_target_by_entryid(entryInfo->getEntryID());
+      }
 
       return true;
    }
@@ -357,6 +368,11 @@ FhgfsOpsErr InodeFileStore::unlinkFileInodeUnlocked(EntryInfo* entryInfo,
       return FhgfsOpsErr_INTERNAL;
    }
 
+   //Trigger InvalWatch invalidation event
+   if (! invalidate_target_by_entryid(entryInfo->getEntryID()))
+   {
+      // trigger failed. What to do?
+   }
    return FhgfsOpsErr_SUCCESS;
 }
 
@@ -415,6 +431,12 @@ FhgfsOpsErr InodeFileStore::moveRemoteBegin(EntryInfo* entryInfo, char* buf, siz
          ser % inode->rstInfo;
 
       *outUsedBufLen = ser.size();
+
+      //Trigger InvalWatch invalidation event
+      if (! invalidate_target_by_entryid(entryInfo->getEntryID()))
+      {
+         // trigger failed. What to do?
+      }
    }
 
    return retVal;
@@ -559,6 +581,8 @@ FhgfsOpsErr InodeFileStore::stat(EntryInfo* entryInfo, bool loadFromDisk, StatDa
 FhgfsOpsErr InodeFileStore::setAttr(EntryInfo* entryInfo, int validAttribs,
    SettableFileAttribs* attribs)
 {
+   FhgfsOpsErr result = FhgfsOpsErr_PATHNOTEXISTS;
+
    std::string entryID = entryInfo->getEntryID();
 
    RWLockGuard lock(rwlock, SafeRWLock_WRITE);
@@ -577,10 +601,10 @@ FhgfsOpsErr InodeFileStore::setAttr(EntryInfo* entryInfo, int validAttribs,
 
          if(likely(setRes) )
          { // attr update succeeded
-            return FhgfsOpsErr_SUCCESS;
+            result = FhgfsOpsErr_SUCCESS;
          }
          else
-            return FhgfsOpsErr_INTERNAL;
+            result = FhgfsOpsErr_INTERNAL;
       }
    }
    else
@@ -594,14 +618,25 @@ FhgfsOpsErr InodeFileStore::setAttr(EntryInfo* entryInfo, int validAttribs,
 
          if(likely(setRes) )
          { // attr update succeeded
-            return FhgfsOpsErr_SUCCESS;
+            result = FhgfsOpsErr_SUCCESS;
          }
          else
-            return FhgfsOpsErr_INTERNAL;
+            result = FhgfsOpsErr_INTERNAL;
       }
    }
 
-   return FhgfsOpsErr_PATHNOTEXISTS;
+   if (result == FhgfsOpsErr_SUCCESS)
+   {
+      // Maybe no a great idea to use this helper instead of
+      // invalidate_target() directly.
+      // The helper incurs some more latency for looking up by entryId.
+      if (! invalidate_target_by_entryid(entryInfo->getEntryID()))
+      {
+         // trigger failed. What to do?
+      }
+   }
+
+   return result;
 }
 
 /**

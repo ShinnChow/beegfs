@@ -9,8 +9,10 @@
 #include <common/toolkit/MetadataTk.h>
 #include <common/storage/FileEvent.h>
 #include <common/storage/StorageErrors.h>
+#include <common/toolkit/GetEntryInfoResult.h>
 #include <net/filesystem/FhgfsOpsCommKit.h>
 #include <net/filesystem/RemotingIOInfo.h>
+#include <common/net/message/storage/attribs/ReadInvalidationsRespMsg.h>
 #include <os/iov_iter.h>
 #include <toolkit/FhgfsPage.h>
 #include <toolkit/FhgfsChunkPageVec.h>
@@ -126,8 +128,8 @@ extern FhgfsOpsErr FhgfsOpsRemoting_removeXAttr(App* app, const EntryInfo* entry
       const char* name);
 extern FhgfsOpsErr FhgfsOpsRemoting_setXAttr(App* app, const EntryInfo* entryInfo, const char* name,
       const char* value, const size_t size, int flags);
-
-
+extern FhgfsOpsErr FhgfsOpsRemoting_readInvalidations(App* app, NumNodeID metaID,
+   uint32_t inReadPos, bool resync, ReadInvalidationsData* outData);
 extern FhgfsOpsErr FhgfsOpsRemoting_lookupIntent(App* app,
    const LookupIntentInfoIn* inInfo, LookupIntentInfoOut* outInfo);
 
@@ -143,6 +145,8 @@ extern FhgfsOpsErr FhgfsOpsRemoting_getFileVersion(App* app, const EntryInfo* en
    uint32_t* outVersion);
 
 extern FhgfsOpsErr FhgfsOpsRemoting_SetFileState(App* app, const EntryInfo* entryInfo, uint8_t state);
+extern FhgfsOpsErr FhgfsOpsRemoting_GetEntryInfo(App* app, const EntryInfo* entryInfo,
+   GetEntryInfoResult* outResult);
 
 FhgfsOpsErr __FhgfsOpsRemoting_flockGenericEx(struct NetMessage* requestMsg, unsigned respMsgType,
    NodeOrGroup owner, bool isBuddyMirrored, App* app, const char* fileHandleID, int lockTypeFlags,

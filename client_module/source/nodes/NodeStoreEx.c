@@ -98,7 +98,7 @@ bool NodeStoreEx_addOrUpdateNode(NodeStoreEx* this, Node** node)
             "Updating alias for node: %s -> %s; Type: %s",
             activeAlias.buf, incomingAlias.buf, Node_nodeTypeToStr(this->storeType) );
          // The node type should not be updated this way so we set it to invalid (no update).
-         setAliasResult = Node_setNodeAliasAndType(active, incomingAlias.buf, NODETYPE_Invalid);
+         setAliasResult = Node_setAliasAndTypeStr(active, incomingAlias.buf);
 
          if (!setAliasResult) {
             NodeString nodeAndType;
@@ -138,7 +138,6 @@ bool NodeStoreEx_addOrUpdateNode(NodeStoreEx* this, Node** node)
       #endif // BEEGFS_DEBUG
 
       Node_setIsActive(*node, true);
-      Node_setNodeAliasAndType(*node, NULL, this->storeType);
 
       __NodeStoreEx_handleNodeVersion(this, *node);
 

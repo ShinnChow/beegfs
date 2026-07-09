@@ -33,8 +33,7 @@ struct StripePatternHeader
    unsigned       patternLength; // in bytes
    unsigned       patternType; // the type of pattern, defined as STRIPEPATTERN_x
    unsigned       chunkSize;
-   // storagePoolId is unused in the client at the moment; however we deserialize it to avoid human
-   // errors later
+   // storagePoolId is largely unused on the client except for the GetEntryInfoV2 ioctl.
    StoragePoolId  storagePoolId;
 };
 
@@ -63,6 +62,7 @@ extern UInt16Vec* StripePattern_getMirrorTargetIDs(StripePattern* this);
 // getters & setters
 static inline int StripePattern_getPatternType(StripePattern* this);
 static inline unsigned StripePattern_getChunkSize(StripePattern* this);
+static inline uint16_t StripePattern_getStoragePoolId(StripePattern* this);
 static inline int64_t StripePattern_getChunkStart(StripePattern* this, int64_t pos);
 static inline int64_t StripePattern_getNextChunkStart(StripePattern* this, int64_t pos);
 static inline int64_t StripePattern_getChunkEnd(StripePattern* this, int64_t pos);
@@ -72,6 +72,7 @@ struct StripePattern
 {
    unsigned patternType; // STRIPEPATTERN_...
    unsigned chunkSize; // must be a power of two (optimizations rely on it)
+   StoragePoolId storagePoolId; // set by StripePattern_createFromBuf after deserialization
 
    unsigned serialPatternLength; // for (de)serialization
 
@@ -96,6 +97,7 @@ void StripePattern_initFromPatternType(StripePattern* this, unsigned patternType
 {
    this->patternType = patternType;
    this->chunkSize = chunkSize;
+   StoragePoolId_set(&this->storagePoolId, 0);
 
    this->serialPatternLength = 0;
 
@@ -112,6 +114,11 @@ int StripePattern_getPatternType(StripePattern* this)
 unsigned StripePattern_getChunkSize(StripePattern* this)
 {
    return this->chunkSize;
+}
+
+uint16_t StripePattern_getStoragePoolId(StripePattern* this)
+{
+   return this->storagePoolId.value;
 }
 
 int64_t StripePattern_getChunkStart(StripePattern* this, int64_t pos)

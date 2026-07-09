@@ -80,6 +80,17 @@ void StatsCollector::requestLoop()
                app->getTSDB()->insertHighResMetaNodeData(iter->node, *listIter);
             }
 
+            for (auto const& entry : iter->data.invalWatchStat.perWatcherData)
+            {
+               app->getTSDB()->insertPerClientInvalWatchData(iter->node, entry);
+            }
+
+            for (auto listIter = iter->metaTargetList.begin();
+                  listIter != iter->metaTargetList.end(); listIter++)
+            {
+               app->getTSDB()->insertMetaTargetsData(iter->node, *listIter);
+            }
+
             if (collectClientOpsByNode)
             {
                for (auto mapIter = iter->ipOpsUnorderedMap.begin();

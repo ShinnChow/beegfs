@@ -14,7 +14,7 @@
 #include "FhgfsOpsDir.h"
 #include "FhgfsOpsSuper.h"
 #include "FhgfsOpsHelper.h"
-
+#include <linux/security.h>
 
 #include <linux/namei.h>
 
@@ -232,8 +232,7 @@ static int __FhgfsOps_revalidateIntent(struct inode* parentInode, struct dentry*
       else if (outInfo.statRes == FhgfsOpsErr_NOTOWNER)
          fhgfsStatPtr = NULL; // stat values not available
       else if (outInfo.statRes == FhgfsOpsErr_INTERNAL 
-         && outInfo.revalidateRes == FhgfsOpsErr_METAVERSIONMISMATCH
-         && Config_getSysCacheInvalidationVersion(cfg) )
+         && outInfo.revalidateRes == FhgfsOpsErr_METAVERSIONMISMATCH)
       {
          // case when we want to invalidate the inode cache due to inode version change
          // this case will not drop the dentry 

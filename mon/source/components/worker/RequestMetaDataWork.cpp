@@ -42,11 +42,19 @@ void RequestMetaDataWork::process(char* bufIn, unsigned bufInLen, char* bufOut, 
          auto metaRspMsg = static_cast<RequestMetaDataRespMsg*>(respMsg.get());
          result.highResStatsList = std::move(metaRspMsg->getStatsList());
 
+         if (metaRspMsg->isMsgHeaderCompatFeatureFlagSet(REQUESTMETADATARESP_HAS_META_TARGETS))
+            result.metaTargetList = std::move(metaRspMsg->getMetaTargets());
+
          result.data.isResponding = true;
          result.data.indirectWorkListSize = metaRspMsg->getIndirectWorkListSize();
          result.data.directWorkListSize = metaRspMsg->getDirectWorkListSize();
          result.data.sessionCount = metaRspMsg->getSessionCount();
          result.data.hostnameid = metaRspMsg->gethostnameid();
+
+         if (metaRspMsg->isMsgHeaderCompatFeatureFlagSet(REQUESTMETADATARESP_HAS_CACHE_STATS))
+         {
+            result.data.invalWatchStat = metaRspMsg->getInvalWatchData();
+         }
 
          if (!result.highResStatsList.empty())
          {

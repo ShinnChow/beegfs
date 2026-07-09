@@ -1,5 +1,6 @@
 #include <common/net/message/storage/mirroring/SetMetadataMirroringRespMsg.h>
 #include <common/toolkit/MetaStorageTk.h>
+#include <components/InvalWatch.h>
 #include <storage/DirInode.h>
 #include <storage/MetaStore.h>
 
@@ -119,6 +120,7 @@ FhgfsOpsErr SetMetadataMirroringMsgEx::setMirroring()
 
    // update root Node in meta store
    app->getMetaRoot().set(NumNodeID(buddyGroupID), true);
+   invalidate_target_by_entryid(META_ROOTDIR_ID_STR);
 
    return FhgfsOpsErr_SUCCESS;
 }

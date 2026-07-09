@@ -4,6 +4,7 @@
 #include <common/nodes/Node.h>
 #include <common/Common.h>
 #include <common/threading/RWLockGuard.h>
+#include <common/net/message/mon/RequestMetaDataRespMsg.h>
 
 struct MetaNodeDataContent
 {
@@ -12,6 +13,7 @@ struct MetaNodeDataContent
    unsigned directWorkListSize;
    unsigned sessionCount;
    std::string hostnameid;
+   InvalWatchStat invalWatchStat;
 };
 
 class MetaNodeEx: public Node

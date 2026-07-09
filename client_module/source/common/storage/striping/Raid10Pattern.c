@@ -73,9 +73,19 @@ uint16_t Raid10Pattern_getStripeTargetID(StripePattern* this, int64_t pos)
 {
    Raid10Pattern* thisCast = (Raid10Pattern*)this;
 
-   size_t targetIndex = Raid10Pattern_getStripeTargetIndex(this, pos);
+   /*
+    * Directory patterns carry no assigned targets (only defaultNumTargets), which
+    * causes stripeSetSize to be computed as 0 during deserialization. Calling
+    * getStripeTargetID() on a directory pattern is a programming error; return 0
+    * (the BeeGFS "no target" sentinel, same as SimplePattern_getStripeTargetID).
+    */
+   BEEGFS_BUG_ON(!thisCast->stripeSetSize,
+      "Stripe pattern has no assigned target IDs; likely a directory pattern "
+      "(directories carry only defaultNumTargets, not actual target IDs)");
+   if (!thisCast->stripeSetSize)
+      return 0;
 
-   return UInt16Vec_at(&thisCast->stripeTargetIDs, targetIndex);
+   return UInt16Vec_at(&thisCast->stripeTargetIDs, Raid10Pattern_getStripeTargetIndex(this, pos));
 }
 
 void Raid10Pattern_getStripeTargetIDsCopy(StripePattern* this, UInt16Vec* outTargetIDs)

@@ -47,6 +47,7 @@ static long FhgfsOpsIoctl_getInodeID(struct file *file, void __user *argp);
 static long FhgfsOpsIoctl_getEntryInfo(struct file *file, void __user *argp);
 static long FhgfsOpsIoctl_pingNode(struct file *file, void __user *argp);
 static long FhgfsOpsIoctl_setFileState(struct file *file, void __user *argp);
+static long FhgfsOpsIoctl_GetEntryInfoV2(struct file *file, void __user *argp);
 
 static NodeType FhgfsOpsIoctl_strToNodeType(const char* str, size_t len)
 {
@@ -158,6 +159,11 @@ long FhgfsOpsIoctl_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
       case BEEGFS_IOC_SET_FILE_STATE:
       {
          return FhgfsOpsIoctl_setFileState(file, (void __user *) arg);
+      } break;
+
+      case BEEGFS_IOC_GETENTRYINFO_V2:
+      {
+         return FhgfsOpsIoctl_GetEntryInfoV2(file, (void __user *) arg);
       } break;
 
       case TCGETS:
@@ -1376,4 +1382,289 @@ cleanup:
    mnt_drop_write(mnt); // Release mnt write reference counter
 
    return retVal;
+}
+
+/**
+ * Get comprehensive entry info by sending a GetEntryInfo RPC to the metadata server.
+ *
+ * The fd MUST be an open directory.  If arg->filename is non-empty, a LookupIntent
+ * RPC is first sent to meta to resolve that direct child; the resulting EntryInfo is
+ * then used for the GetEntryInfo RPC.  If arg->filename is empty the directory fd's
+ * own cached EntryInfo is used directly (original behaviour).
+ *
+ * Internally uses GetEntryInfoResult to hold deep-copied RPC response data
+ * (pattern, pathInfo, rst); freed before this function returns.
+ */
+static long FhgfsOpsIoctl_GetEntryInfoV2(struct file *file, void __user *argp)
+{
+   struct BeegfsIoctl_GetEntryInfoV2_Arg __user *arg = argp;
+   struct dentry* fileDentry = file_dentry(file);
+   struct inode* parentInode = file_inode(file);
+
+   App* app = FhgfsOps_getApp(fileDentry->d_sb);
+   Logger* log = App_getLogger(app);
+   const char* logContext = __func__;
+
+   FhgfsInode* fhgfsParentInode = BEEGFS_INODE(parentInode);
+
+   char filename[BEEGFS_IOCTL_FILENAME_MAXLEN];
+   const EntryInfo* entryInfo;
+   EntryInfo childEntryInfo;
+   bool freeChildEntryInfo = false;
+   GetEntryInfoResult result;
+   FhgfsOpsErr rpcRes;
+   StripePattern* pattern;
+   UInt16Vec* targets;
+   uint16_t numTargets;
+   uint16_t i;
+   size_t nameLen;
+   long retVal = 0;
+
+   GetEntryInfoResult_prepare(&result);
+
+   /* Read the filename input field from userspace */
+   if (copy_from_user(filename, arg->filename, BEEGFS_IOCTL_FILENAME_MAXLEN))
+      return -EFAULT;
+
+   /*
+    * Sanity check: if the last byte is not null, the name exceeds the maximum
+    * supported length (BEEGFS_IOCTL_FILENAME_MAXLEN - 1 characters).
+    * Reject early rather than silently truncating.
+    */
+   if (filename[BEEGFS_IOCTL_FILENAME_MAXLEN - 1] != '\0')
+      return -ENAMETOOLONG;
+
+   /* fd must be a directory */
+   if (!S_ISDIR(parentInode->i_mode))
+      return -ENOTDIR;
+
+   nameLen = strnlen(filename, BEEGFS_IOCTL_FILENAME_MAXLEN);
+
+   if (nameLen > 0)
+   {
+      /* --- Path A: filename provided — look up child entry on meta --- */
+      LookupIntentInfoIn inInfo;
+      LookupIntentInfoOut outInfo;
+      fhgfs_stat fhgfsStat = {0};
+      FhgfsOpsErr lookupRes;
+
+      if (strchr(filename, '/'))
+         return -EINVAL;
+
+      /* Looking up a child by name requires directory search (execute) permission,
+       * the same check the VFS performs for any path component traversal. */
+      retVal = os_inode_permission(file, parentInode, MAY_EXEC);
+      if (retVal)
+         return retVal;
+
+      /* Perform lookup under parent entryInfo read lock */
+      FhgfsInode_entryInfoReadLock(fhgfsParentInode);
+      LookupIntentInfoIn_init(&inInfo, FhgfsInode_getEntryInfo(fhgfsParentInode), filename);
+      LookupIntentInfoOut_prepare(&outInfo, &childEntryInfo, &fhgfsStat);
+      lookupRes = FhgfsOpsRemoting_lookupIntent(app, &inInfo, &outInfo);
+      FhgfsInode_entryInfoReadUnlock(fhgfsParentInode);
+
+      if (lookupRes != FhgfsOpsErr_SUCCESS || outInfo.lookupRes != FhgfsOpsErr_SUCCESS)
+      {
+         FhgfsOpsErr err = (lookupRes != FhgfsOpsErr_SUCCESS) ? lookupRes : outInfo.lookupRes;
+         Logger_logFormatted(log, Log_WARNING, logContext,
+            "Lookup failed for '%s': %s", filename, FhgfsOpsErr_toErrString(err));
+         LookupIntentInfoOut_uninit(&outInfo);
+         return FhgfsOpsErr_toSysErr(err);
+      }
+
+      /* Transfer childEntryInfo ownership away from outInfo before uninit */
+      LookupIntentInfoOut_setEntryInfoPtr(&outInfo, NULL);
+      LookupIntentInfoOut_uninit(&outInfo);
+      freeChildEntryInfo = true;
+      entryInfo = &childEntryInfo;
+
+      /* Copy child entry info fields to userspace (filename written back first so
+       * callers see the resolved canonical name rather than their input string) */
+      if (copy_to_user(arg->filename, entryInfo->fileName,
+            strnlen(entryInfo->fileName, BEEGFS_IOCTL_FILENAME_MAXLEN - 1) + 1))
+         goto cleanup;
+      if (put_user(EntryInfo_getOwner(entryInfo), &arg->ownerID))
+         goto cleanup;
+      if (copy_to_user(arg->parentEntryID, EntryInfo_getParentEntryID(entryInfo),
+            strnlen(entryInfo->parentEntryID, BEEGFS_IOCTL_ENTRYID_MAXLEN) + 1))
+         goto cleanup;
+      if (copy_to_user(arg->entryID, EntryInfo_getEntryID(entryInfo),
+            strnlen(entryInfo->entryID, BEEGFS_IOCTL_ENTRYID_MAXLEN) + 1))
+         goto cleanup;
+      if (put_user(entryInfo->entryType, &arg->entryType))
+         goto cleanup;
+      if (put_user(entryInfo->featureFlags, &arg->featureFlags))
+         goto cleanup;
+
+      rpcRes = FhgfsOpsRemoting_GetEntryInfo(app, entryInfo, &result);
+
+      if (rpcRes != FhgfsOpsErr_SUCCESS)
+      {
+         /* Meta returned a non-success result. Basic entry info fields were
+          * already written above; stripe/PathInfo/RST/session data are
+          * unavailable. Return success and report the exact RPC result code
+          * so the caller can decide how to handle it. */
+         Logger_logFormatted(log, Log_DEBUG, logContext,
+            "GetEntryInfo RPC did not succeed for '%s': %s", filename, FhgfsOpsErr_toErrString(rpcRes));
+         if (put_user((int32_t)rpcRes, &arg->getEntryInfoResult))
+         {
+            retVal = -EFAULT;
+            goto cleanup;
+         }
+         goto out;
+      }
+   }
+   else
+   {
+      /* --- Path B: no filename — query the directory fd itself --- */
+
+      /* Hold the read lock across put_user + RPC so the entryInfo pointer
+       * (which lives inside the inode) remains valid for the duration. */
+      FhgfsInode_entryInfoReadLock(fhgfsParentInode);
+      entryInfo = FhgfsInode_getEntryInfo(fhgfsParentInode);
+
+      /* Copy directory entry info fields to userspace (filename written back so
+       * callers see the directory's own name rather than empty string) */
+      if (copy_to_user(arg->filename, entryInfo->fileName,
+            strnlen(entryInfo->fileName, BEEGFS_IOCTL_FILENAME_MAXLEN - 1) + 1))
+         goto cleanup_entryinfo;
+      if (put_user(EntryInfo_getOwner(entryInfo), &arg->ownerID))
+         goto cleanup_entryinfo;
+      if (copy_to_user(arg->parentEntryID, EntryInfo_getParentEntryID(entryInfo),
+            strnlen(entryInfo->parentEntryID, BEEGFS_IOCTL_ENTRYID_MAXLEN) + 1))
+         goto cleanup_entryinfo;
+      if (copy_to_user(arg->entryID, EntryInfo_getEntryID(entryInfo),
+            strnlen(entryInfo->entryID, BEEGFS_IOCTL_ENTRYID_MAXLEN) + 1))
+         goto cleanup_entryinfo;
+      if (put_user(entryInfo->entryType, &arg->entryType))
+         goto cleanup_entryinfo;
+      if (put_user(entryInfo->featureFlags, &arg->featureFlags))
+         goto cleanup_entryinfo;
+
+      rpcRes = FhgfsOpsRemoting_GetEntryInfo(app, entryInfo, &result);
+
+      FhgfsInode_entryInfoReadUnlock(fhgfsParentInode);
+
+      if (rpcRes != FhgfsOpsErr_SUCCESS)
+      {
+         /* Meta returned a non-success result. Basic entry info fields were
+          * already written above; stripe/PathInfo/RST/session data are
+          * unavailable. Return success and report the exact RPC result code
+          * so the caller can decide how to handle it. */
+         Logger_logFormatted(log, Log_DEBUG, logContext,
+            "GetEntryInfo RPC did not succeed: %s", FhgfsOpsErr_toErrString(rpcRes));
+         if (put_user((int32_t)rpcRes, &arg->getEntryInfoResult))
+         {
+            retVal = -EFAULT;
+            goto cleanup;
+         }
+         goto out;
+      }
+   }
+
+   /* --- Common: serialize RPC result to userspace --- */
+
+   if (put_user((int32_t)FhgfsOpsErr_SUCCESS, &arg->getEntryInfoResult))
+      goto cleanup;
+
+   /* Stripe pattern */
+   pattern = result.pattern;
+   targets = pattern->getStripeTargetIDs(pattern); /* NULL only for SimplePattern (STRIPEPATTERN_Invalid); dirs return a valid but empty vector */
+   numTargets = targets ? (uint16_t)UInt16Vec_length(targets) : 0;
+
+   if (numTargets > BEEGFS_IOCTL_MAX_STRIPE_TARGETS)
+   {
+      Logger_logFormatted(log, Log_WARNING, logContext,
+         "Stripe target count %u exceeds ioctl max %u, truncating",
+         (unsigned)numTargets, BEEGFS_IOCTL_MAX_STRIPE_TARGETS);
+      numTargets = BEEGFS_IOCTL_MAX_STRIPE_TARGETS;
+   }
+
+   if (put_user((uint32_t)StripePattern_getPatternType(pattern), &arg->patternType))
+      goto cleanup;
+   if (put_user(StripePattern_getChunkSize(pattern), &arg->chunkSize))
+      goto cleanup;
+   if (put_user(pattern->getDefaultNumTargets(pattern), &arg->defaultNumTargets))
+      goto cleanup;
+   if (put_user((uint32_t)StripePattern_getStoragePoolId(pattern), &arg->storagePoolId))
+      goto cleanup;
+   if (put_user(numTargets, &arg->numTargets))
+      goto cleanup;
+   for (i = 0; i < numTargets; i++)
+   {
+      if (put_user(UInt16Vec_at(targets, i), &arg->stripeTargetIDs[i]))
+         goto cleanup;
+   }
+
+   /* PathInfo */
+   if (put_user(result.pathInfo.flags, &arg->pathInfoFlags))
+      goto cleanup;
+   if (put_user(result.pathInfo.origParentUID, &arg->origParentUID))
+      goto cleanup;
+   if (result.pathInfo.origParentEntryID)
+   {
+      if (copy_to_user(arg->origParentEntryID, result.pathInfo.origParentEntryID,
+            strnlen(result.pathInfo.origParentEntryID, BEEGFS_IOCTL_ENTRYID_MAXLEN) + 1))
+         goto cleanup;
+   }
+   else
+   {
+      if (put_user('\0', &arg->origParentEntryID[0]))
+         goto cleanup;
+   }
+
+   /* RST */
+   if (put_user(result.rst.majorVersion, &arg->rstMajorVersion))
+      goto cleanup;
+   if (put_user(result.rst.minorVersion, &arg->rstMinorVersion))
+      goto cleanup;
+   if (put_user(result.rst.coolDownPeriod, &arg->rstCoolDownPeriod))
+      goto cleanup;
+   if (put_user(result.rst.filePolicies, &arg->rstFilePolicies))
+      goto cleanup;
+
+   {
+      uint32_t numRSTIds = result.rst.numRSTIds;
+
+      if (numRSTIds > BEEGFS_IOCTL_MAX_RST_IDS)
+      {
+         Logger_logFormatted(log, Log_WARNING, logContext,
+            "RST ID count %u exceeds ioctl max %u, truncating",
+            (unsigned)numRSTIds, BEEGFS_IOCTL_MAX_RST_IDS);
+         numRSTIds = BEEGFS_IOCTL_MAX_RST_IDS;
+      }
+
+      if (put_user(numRSTIds, &arg->numRSTIds))
+         goto cleanup;
+      for (i = 0; i < numRSTIds; i++)
+      {
+         if (put_user(result.rst.rstIds[i], &arg->rstIds[i]))
+            goto cleanup;
+      }
+   }
+
+   /* Session and file state info */
+   if (put_user(result.numSessionsRead, &arg->numSessionsRead))
+      goto cleanup;
+   if (put_user(result.numSessionsWrite, &arg->numSessionsWrite))
+      goto cleanup;
+   if (put_user(result.fileDataState, &arg->fileDataState))
+      goto cleanup;
+
+out:
+   GetEntryInfoResult_uninit(&result);
+   if (freeChildEntryInfo)
+      EntryInfo_uninit(&childEntryInfo);
+   return 0;
+
+cleanup_entryinfo:
+   /* Only reachable from Path B while the read lock is still held */
+   FhgfsInode_entryInfoReadUnlock(fhgfsParentInode);
+   /* fall through */
+cleanup:
+   GetEntryInfoResult_uninit(&result);
+   if (freeChildEntryInfo)
+      EntryInfo_uninit(&childEntryInfo);
+   return retVal ? retVal : -EFAULT;
 }

@@ -81,6 +81,8 @@ SOURCES := \
    common/net/message/nodes/RefreshTargetStatesMsgEx.c \
    common/net/message/nodes/GetNodesRespMsg.c \
    common/net/message/nodes/SetMirrorBuddyGroupMsgEx.c \
+   common/net/message/nodes/HandshakeMsg.c \
+   common/net/message/nodes/HandshakeRespMsg.c \
    common/net/message/SimpleMsg.c \
    common/net/message/storage/moving/RenameMsg.c \
    common/net/message/storage/StatStoragePathRespMsg.c \
@@ -97,11 +99,15 @@ SOURCES := \
    common/net/message/storage/attribs/ListXAttrMsg.c \
    common/net/message/storage/attribs/RefreshEntryInfoMsg.c \
    common/net/message/storage/attribs/StatMsg.c \
+   common/net/message/storage/attribs/ReadInvalidationsRespMsg.c \
+   common/net/message/storage/attribs/ReadInvalidationsMsg.c \
    common/net/message/storage/attribs/GetXAttrRespMsg.c \
    common/net/message/storage/attribs/GetXAttrMsg.c \
    common/net/message/storage/attribs/RemoveXAttrMsg.c \
    common/net/message/storage/attribs/SetXAttrMsg.c \
    common/net/message/storage/attribs/SetFileStateMsg.c \
+   common/net/message/storage/attribs/GetEntryInfoMsg.c \
+   common/net/message/storage/attribs/GetEntryInfoRespMsg.c \
    common/net/message/storage/lookup/LookupIntentRespMsg.c \
    common/net/message/storage/lookup/LookupIntentMsg.c \
    common/net/message/storage/TruncFileMsg.c \
@@ -142,6 +148,7 @@ SOURCES := \
    common/storage/striping/Raid10Pattern.c \
    common/storage/striping/Raid0Pattern.c \
    common/storage/PathInfo.c \
+   common/storage/RemoteStorageTarget.c \
    common/storage/RdmaInfo.c \
    common/storage/Nvfs.c \
    common/storage/EntryInfo.c \
@@ -155,6 +162,7 @@ SOURCES := \
    toolkit/BitStore.c \
    components/DatagramListener.c \
    components/InternodeSyncer.c \
+   components/InvalReader.c \
    components/Flusher.c \
    components/worker/RWPagesWork.c \
    components/AckManager.c \
@@ -168,6 +176,9 @@ SOURCES := \
    filesystem/helper/IoctlHelper.c \
    filesystem/FsFileInfo.c \
    filesystem/ProcFsHelper.c \
+   filesystem/BeeGFSNFS4AclXdr.c \
+   filesystem/BeeGFSNFS4Acl.c \
+   filesystem/BeeGFSNFS4AclResolvers.c \
    filesystem/FhgfsOpsSuper.c \
    filesystem/FhgfsOps_versions.c \
    filesystem/FhgfsXAttrHandlers.c \

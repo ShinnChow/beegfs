@@ -3,9 +3,6 @@
 # It creates the client kernel module (beegfs.ko).
 #
 # Use "make help" to find out about configuration options.
-#
-# Note: This is the Makefile for internal use, there is a separate Release.mk
-# file for release packages (to handle the closed source tree properly).
 
 TARGET ?= beegfs
 
@@ -255,7 +252,7 @@ endif
 install:
 	install -D -m 644 $(TARGET).ko $(KMOD_INST_DIR)/$(TARGET).ko
 	@if [ -f dist/sbin/mount.beegfs ]; then \
-		install -D -m 755 dist/sbin/mount.beegfs /sbin/mount.beegfs; \
+		install -m 755 dist/sbin/mount.beegfs /sbin/mount.beegfs; \
 		echo "Info: Installed mount script at /sbin/mount.beegfs."; \
 	elif [ ! -f /sbin/mount.beegfs ]; then \
 		echo "Error: mount.beegfs does not already exist at /sbin/mount.beegfs (this is likely a bug elsewhere)."; \

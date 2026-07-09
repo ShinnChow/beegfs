@@ -213,8 +213,13 @@ extern int FhgfsOps_set_acl(struct inode* inode, struct posix_acl* acl, int type
 #endif // KERNEL_HAS_SET_ACL
 
 #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
+#if defined(KERNEL_HAS_MKDIR_RET_DENTRY)
+extern struct dentry* FhgfsOps_mkdir(struct mnt_idmap* idmap, struct inode* dir,
+   struct dentry* dentry, umode_t mode);
+#else
 extern int FhgfsOps_mkdir(struct mnt_idmap* idmap, struct inode* dir,
    struct dentry* dentry, umode_t mode);
+#endif
 extern int FhgfsOps_mknod(struct mnt_idmap* idmap, struct inode* dir,
    struct dentry* dentry, umode_t mode, dev_t dev);
 #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
@@ -342,7 +347,6 @@ static inline struct inode* __FhgfsOps_newInode(struct super_block* sb, struct k
 static inline bool __FhgfsOps_isPagedMode(struct super_block* sb);
 
 
-
 /**
  * This structure is passed to _compareInodeID().
  */
@@ -389,6 +393,7 @@ void __FhgfsOps_applyStatAttribsToInode(struct kstat* kstat, struct inode* outIn
 
    // remote attribs (received from nodes)
    outInode->i_mode = kstat->mode;
+   //should change with chown
    outInode->i_uid = kstat->uid;
    outInode->i_gid = kstat->gid;
    inode_set_atime_to_ts(outInode, kstat->atime);

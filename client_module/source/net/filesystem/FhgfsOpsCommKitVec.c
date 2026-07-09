@@ -871,7 +871,7 @@ void __FhgfsOpsCommKitVec_writefileStageRECV(CommKitVecHelper* commHelper,
    LOG_DEBUG_TOP_FORMATTED(commHelper->log, LogTopic_COMMKIT, Log_DEBUG, __func__, "enter");
 
    respRes = MessagingTk_recvMsgBuf(commHelper->app, comm->sock,
-      comm->msgBuf, BEEGFS_COMMKIT_MSGBUF_SIZE);
+      comm->msgBuf, BEEGFS_COMMKIT_MSGBUF_SIZE, 0);
 
 #if (BEEGFS_COMMKIT_DEBUG & COMMKIT_DEBUG_WRITE_RECV)
       if (respRes == FhgfsOpsErr_SUCCESS && jiffies % CommKitErrorInjectRate == 0)

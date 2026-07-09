@@ -12,7 +12,6 @@ enum class MetaSyncDirType
    DentriesHashDir,
    ContentDir,
 };
-GCC_COMPAT_ENUM_CLASS_OPEQNEQ(MetaSyncDirType)
 
 class MetaSyncCandidateDir
 {
@@ -38,7 +37,6 @@ enum class MetaSyncFileType
    Dentry,
    Directory,
 };
-GCC_COMPAT_ENUM_CLASS_OPEQNEQ(MetaSyncFileType)
 
 template<>
 struct SerializeAs<MetaSyncFileType> {

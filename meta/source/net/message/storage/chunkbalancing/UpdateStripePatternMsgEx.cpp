@@ -1,5 +1,6 @@
 #include <toolkit/StorageTkEx.h>
 #include <program/Program.h>
+#include <components/InvalWatch.h>
 #include <storage/MetaStore.h>
 #include <components/FileEventLogger.h>
 
@@ -206,6 +207,11 @@ bool UpdateStripePatternMsgEx::setStripePattern(EntryInfo* entryInfo, FileInode&
          + std::to_string(localTargetID) + "; destinationTargetID: "
          + std::to_string(destinationID));
    }
+   else
+   {
+      invalidate_target_by_entryid(entryInfo->getEntryID());
+   }
+
 
    return setPatternRes;
 }

@@ -27,6 +27,7 @@
 #include <linux/types.h>
 #include <linux/stddef.h>
 #include <linux/cred.h>
+#include <linux/writeback.h>
 #include <asm/div64.h>
 
 #ifdef KERNEL_HAS_SCHED_SIG_H
@@ -91,6 +92,10 @@
 #define printk_fhgfs(levelStr, fmtStr, ...) \
    printk(levelStr BEEGFS_MODULE_NAME_STR ": " "%s(%u): " fmtStr, current->comm, \
       (unsigned)current->pid, ## __VA_ARGS__)
+
+#define vprintk_fhgfs(levelStr, fmtStr, ap) \
+   vprintk(levelStr BEEGFS_MODULE_NAME_STR ": " "%s(%u): " fmtStr, current->comm, \
+      (unsigned)current->pid, ap)
 
 // for interrupt handling routines (does not print "current")
 #define printk_fhgfs_ir(levelStr, fmtStr, ...) \
@@ -244,6 +249,71 @@ static inline struct timespec current_fs_time(struct super_block *sb)
 
 #ifndef swap
    #define swap(a, b) do { typeof(a) __tmp = (a); (a) = (b); (b) = __tmp; } while (0)
+#endif
+
+/*
+ * Compatibility fallback for kernels that removed page_index().
+ *
+ * Current mappings do not enable large folios, so the folio fallback is
+ * equivalent to the old page_index() helper for order-0 page-cache folios. If
+ * large folios are enabled later, tail-page indexes must account for the page
+ * offset within the folio, e.g. folio_index(folio) + folio_page_idx(folio, page).
+ */
+
+#ifndef page_index
+   #ifdef KERNEL_HAS_FOLIO
+      #define page_index(page) (page_folio(page)->index)
+   #else
+      #define page_index(page) ((page)->index)
+   #endif
+#endif
+
+#if defined(KERNEL_HAS_WRITEBACK_ITER)
+static inline int __beegfs_write_cache_pages_iter(struct address_space *mapping,
+   struct writeback_control *wbc,
+   void *data,
+   int (*folio_cb)(struct folio *, struct writeback_control *, void *),
+   int (*page_cb)(struct page *, struct writeback_control *, void *))
+{
+   struct folio *folio = NULL;
+   int error = 0;
+
+   while ((folio = writeback_iter(mapping, wbc, folio, &error)))
+   {
+      int cb_error;
+
+#ifdef KERNEL_WRITEPAGE_HAS_FOLIO
+      cb_error = folio_cb(folio, wbc, data);
+#else
+      cb_error = page_cb(&folio->page, wbc, data);
+#endif
+
+      if (cb_error && !error)
+         error = cb_error;
+   }
+
+   return error;
+}
+
+#ifdef KERNEL_WRITEPAGE_HAS_FOLIO
+static inline int beegfs_write_cache_folio(struct address_space *mapping,
+   struct writeback_control *wbc,
+   int (*writepage_cb)(struct folio *, struct writeback_control *, void *),
+   void *data)
+{
+   return __beegfs_write_cache_pages_iter(mapping, wbc, data, writepage_cb, NULL);
+}
+#else
+static inline int beegfs_write_cache_pages(struct address_space *mapping,
+   struct writeback_control *wbc,
+   int (*writepage_cb)(struct page *, struct writeback_control *, void *),
+   void *data)
+{
+   return __beegfs_write_cache_pages_iter(mapping, wbc, data, NULL, writepage_cb);
+}
+#endif
+#else
+   #define beegfs_write_cache_pages write_cache_pages
 #endif
 
 #undef BEEGFS_RDMA

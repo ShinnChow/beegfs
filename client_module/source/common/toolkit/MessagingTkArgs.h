@@ -108,6 +108,7 @@ struct RequestResponseArgs
 
    // internal (initialized by MessagingTk_requestResponseWithRRArgs() )
    unsigned char logFlags; // REQUESTRESPONSEARGS_LOGFLAG_... combination to avoid double-logging
+   int recvTimeoutMS; // <=0 means cfg->connMsgLongTimeout
 };
 
 /**
@@ -133,6 +134,7 @@ void RequestResponseArgs_prepare(RequestResponseArgs* this, Node* node, NetMessa
    this->outRespMsg = NULL;
 
    this->logFlags = 0;
+   this->recvTimeoutMS = 0;
 }
 
 /**

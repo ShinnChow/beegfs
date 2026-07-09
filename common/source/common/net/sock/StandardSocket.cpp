@@ -501,11 +501,21 @@ ssize_t StandardSocket::recv(void *buf, size_t len, int flags)
    {
       if (isDgramSocket)
       {
+         // Datagram sockets permit zero-length payloads as valid data.
          LOG(COMMUNICATION, NOTICE, "Received empty UDP datagram.", peername);
          return 0;
       }
       else
       {
+         // recv() returning 0 is ambiguous: caller passed len == 0 (POSIX
+         // no-op) vs. peer orderly shutdown. Only the latter is a real
+         // disconnect. Without this guard, zero-length reads from higher
+         // layers (e.g. empty user xattr during buddy resync) falsely
+         // tear down a healthy connection.
+         if (len == 0)
+            return 0;
+
+         // Genuine end-of-stream: peer closed the connection (orderly shutdown).
          throw SocketDisconnectException(std::string("Soft disconnect from ") + peername);
       }
    }

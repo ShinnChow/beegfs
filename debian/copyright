@@ -11,6 +11,15 @@ Files: client_module/*
 Copyright: 2009 Fraunhofer ITWM, 2022 ThinkParQ GmbH
 License: GPL-2
 
+Files: client_module/include/uapi/*
+Copyright: 2009 Fraunhofer ITWM, 2022 ThinkParQ GmbH
+License: GPL-2 with Linux-syscall-note exception
+ These headers declare the userspace ioctl ABI. In addition to GPL-2, the
+ Linux-syscall-note exception applies: userspace programs that use these
+ headers to issue ioctls to the BeeGFS client kernel module are not
+ derivative works of the module and may carry any license.
+ See https://spdx.org/licenses/Linux-syscall-note.html
+
 Files:
  common/source/common/toolkit/BufferTk.cpp
  client_module/source/common/toolkit/HashTk.c

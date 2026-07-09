@@ -8,6 +8,7 @@
 #include <components/ModificationEventFlusher.h>
 #include <program/Program.h>
 #include <storage/PosixACL.h>
+#include <storage/Nfs4ACL.h>
 #include "RmDirMsgEx.h"
 #include "MkDirMsgEx.h"
 
@@ -142,6 +143,7 @@ std::unique_ptr<MkDirMsgEx::ResponseState> MkDirMsgEx::mkDirPrimary(ResponseCont
    const int umask = getUmask();
    CharVector parentDefaultACLXAttr;
    CharVector accessACLXAttr;
+   CharVector nfs4ACLXAttr;
 
    if (config->getStoreClientACLs())
    {
@@ -205,13 +207,41 @@ std::unique_ptr<MkDirMsgEx::ResponseState> MkDirMsgEx::mkDirPrimary(ResponseCont
       }
    }
 
+   // Handle NFSv4 ACL inheritance (independent of POSIX ACLs)
+   if (config->getStoreNFSv4ACLs())
+   {
+      auto [nfs4ParentRes, nfs4ParentData, ignore] = parentDir->getXAttr(nullptr,
+            Nfs4ACL::nfs4ACLXAttrName, XATTR_SIZE_MAX);
+
+      if (nfs4ParentRes == FhgfsOpsErr_SUCCESS)
+      {
+         Nfs4ACL parentNfs4ACL;
+         if (parentNfs4ACL.deserializeXAttr(nfs4ParentData))
+         {
+            // Create inherited ACL for directory (isDirectory = true)
+            Nfs4ACL inheritedNfs4ACL = parentNfs4ACL.createInheritedACL(true);
+
+            if (!inheritedNfs4ACL.empty())
+            {
+               inheritedNfs4ACL.serializeXAttr(nfs4ACLXAttr);
+            }
+         }
+         else
+         {
+            LogContext(logContext).log(Log_WARNING,
+                  "Error deserializing parent directory NFSv4 ACL during directory creation.");
+         }
+      }
+      // Note: FhgfsOpsErr_NODATA is expected when parent has no NFSv4 ACL - not an error
+   }
+
    newEntryInfo.set(NumNodeID(ownerNodeID), parentEntryID, entryID, newName,
       DirEntryType_DIRECTORY, entryInfoFlags);
 
    // create remote dir metadata
    // (we create this before the dentry to reduce the risk of dangling dentries)
    retVal = mkRemoteDirInode(*parentDir, newName, &newEntryInfo, parentDefaultACLXAttr,
-      accessACLXAttr);
+      accessACLXAttr, nfs4ACLXAttr);
 
    if ( likely(retVal == FhgfsOpsErr_SUCCESS) )
    { // remote dir created => create dentry in parent dir
@@ -300,7 +330,8 @@ FhgfsOpsErr MkDirMsgEx::mkDirDentry(DirInode& parentDir, const std::string& name
  * @param mirrorNodeID 0 for disabled mirroring
  */
 FhgfsOpsErr MkDirMsgEx::mkRemoteDirInode(DirInode& parentDir, const std::string& name,
-   EntryInfo* entryInfo, const CharVector& defaultACLXAttr, const CharVector& accessACLXAttr)
+   EntryInfo* entryInfo, const CharVector& defaultACLXAttr, const CharVector& accessACLXAttr,
+   const CharVector& nfs4ACLXAttr)
 {
    const char* logContext = "MkDirMsg (mk dir inode)";
 
@@ -322,7 +353,13 @@ FhgfsOpsErr MkDirMsgEx::mkRemoteDirInode(DirInode& parentDir, const std::string&
 
    NumNodeID parentNodeID = app->getLocalNode().getNumID();
    MkLocalDirMsg mkMsg(entryInfo, getUserID(), getGroupID(), getMode(), pattern, &rstInfo,
-      parentNodeID, defaultACLXAttr, accessACLXAttr);
+      parentNodeID, defaultACLXAttr, accessACLXAttr, nfs4ACLXAttr);
+
+   // Advertise NFSv4 ACL payload to peer MDS so it deserializes the trailing
+   // nfs4ACLXAttr field. Older meta servers ignore this compat flag and the
+   // serializer omits the field, keeping the wire format backward compatible.
+   if (!nfs4ACLXAttr.empty())
+      mkMsg.addMsgHeaderCompatFeatureFlag(MKLOCALDIRMSG_COMPATFLAG_HAS_NFS4_ACL);
 
    RequestResponseArgs rrArgs(NULL, &mkMsg, NETMSGTYPE_MkLocalDirResp);
 

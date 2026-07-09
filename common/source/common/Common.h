@@ -222,74 +222,6 @@ enum LogType
    #define BEEGFS_DEBUG_PROFILING
 #endif
 
-// defined `override` (from c++11) if the compiler does not provide it. gcc >= 4.7 has it,
-// clang since 3.0.
-// we don't support gcc <= 4.4, so don't check those.
-#if (!__clang__ && __GNUC__ == 4 && __GNUC_MINOR__ < 7) || (__clang__ && __clang_major__ < 3)
-   #define override
-#endif
-
-// gcc 4.4 does not seem to support eq-operators for enum classes. other old gcc versions may have
-// this problem.
-#if (!__clang__ && __GNUC__ == 4 && __GNUC_MINOR__ == 4 && __GNUC_PATCHLEVEL__ == 0)
-# define GCC_COMPAT_ENUM_CLASS_OPEQNEQ(TYPE) \
-   inline bool operator==(TYPE a, TYPE b) { return memcmp(&a, &b, sizeof(a)) == 0; } \
-   inline bool operator!=(TYPE a, TYPE b) { return !(a == b); }
-#else
-# define GCC_COMPAT_ENUM_CLASS_OPEQNEQ(TYPE)
-#endif
-
-// define a nullptr type and value (also from c++11) if the compiler does not provide it.
-// gcc >= 4.6 has it, as does clang >= 3.0.
-// this merely approximates the actual nullptr behaviour from c++11, but it approximates it close
-// enough to be useful.
-// the implementation is taken from N2431, which proposes nullptr as a language feature.
-#if (!__clang__ && __GNUC__ == 4 && __GNUC_MINOR__ < 6) || (__clang__ && __clang_major__ < 3)
-struct nullptr_t
-{
-   template<typename T>
-   operator T*() const { return 0; }
-
-   template<typename C, typename T>
-   operator T C::*() const { return 0; }
-
-   template<typename T>
-   operator std::unique_ptr<T>() const { return {}; }
-
-   template<typename T, typename Deleter>
-   operator std::unique_ptr<T, Deleter>() const { return {}; }
-
-   template<typename T>
-   operator std::shared_ptr<T>() const { return {}; }
-
-   template<typename T>
-   operator std::weak_ptr<T>() const { return {}; }
-
-   void operator&() = delete;
-
-   // add a bool-ish conversion operator to allow `if (nullptr)` (e.g. in templates)
-   typedef void (nullptr_t::*bool_type)();
-   operator bool_type() const { return 0; }
-};
-
-#define nullptr ((const nullptr_t)nullptr_t{})
-#endif
-
-#if (!__clang__ && __GNUC__ == 4 && __GNUC_MINOR__ < 6) || (__clang__ && __clang_major__ < 3)
-# define noexcept(...)
-#endif
-
-// libstdc++ <= 4.6 calls std::chrono::steady_clock monotonic_clock, set alias
-#if __GLIBCXX__ && __GLIBCXX__ < 20120322
-namespace std
-{
-namespace chrono
-{
-typedef monotonic_clock steady_clock;
-}
-}
-#endif
-
 /*
  * Optional definitions:
  * - BEEGFS_NO_LICENSE_CHECK: Disables all license checking at startup and runtime
@@ -324,20 +256,11 @@ extern void assertMsg(const char* file, unsigned line, const char* condition);
 # define ASSERT(cond) do {} while (0)
 #endif
 
-#if defined (__GLIBC__) && (__GLIBC__ >= 2) && (__GLIBC_MINOR__ >= 24)
-#define USE_READDIR_R 0
-#else
-#define USE_READDIR_R 1
-#endif
-
 #if __GNUC__ > 6
 # define BEEGFS_FALLTHROUGH [[fallthrough]]
 #else
 # define BEEGFS_FALLTHROUGH
 #endif
-
-// XXX not sure about this. C++17 is the requirement for [[nodiscard]]
-#define BEEGFS_NODISCARD [[nodiscard]]
 
 // version number of both the network protocol and the on-disk data structures that are versioned.
 // must be kept in sync with client.

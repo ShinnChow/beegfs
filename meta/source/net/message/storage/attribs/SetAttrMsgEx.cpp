@@ -8,6 +8,7 @@
 #include <components/worker/SetChunkFileAttribsWork.h>
 #include <program/Program.h>
 #include <session/EntryLock.h>
+#include <components/InvalWatch.h>
 #include "SetAttrMsgEx.h"
 
 #include <boost/lexical_cast.hpp>
@@ -251,7 +252,7 @@ FhgfsOpsErr SetAttrMsgEx::setAttrRoot()
    if(!rootDir->setAttrData(getValidAttribs(), getAttribs() ) )
       return FhgfsOpsErr_INTERNAL;
 
-
+   invalidate_target_by_entryid(META_ROOTDIR_ID_STR);
    return FhgfsOpsErr_SUCCESS;
 }
 

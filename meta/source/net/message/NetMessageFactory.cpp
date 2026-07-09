@@ -31,6 +31,7 @@
 #include <net/message/nodes/RefreshTargetStatesMsgEx.h>
 #include <net/message/nodes/SetMirrorBuddyGroupMsgEx.h>
 #include <net/message/nodes/SetTargetConsistencyStatesMsgEx.h>
+#include <net/message/nodes/HandshakeMsgEx.h>
 #include <net/message/nodes/storagepools/RefreshStoragePoolsMsgEx.h>
 
 // storage messages
@@ -92,6 +93,7 @@
 #include <net/message/storage/quota/SetExceededQuotaMsgEx.h>
 #include <net/message/storage/attribs/GetEntryInfoMsgEx.h>
 #include <net/message/storage/lookup/LookupIntentMsgEx.h>
+#include <net/message/storage/attribs/ReadInvalidationsMsgEx.h>
 #include <net/message/storage/attribs/GetXAttrMsgEx.h>
 #include <net/message/storage/attribs/ListXAttrMsgEx.h>
 #include <net/message/storage/attribs/RemoveXAttrMsgEx.h>
@@ -217,6 +219,8 @@ std::unique_ptr<NetMessage> NetMessageFactory::createFromMsgType(unsigned short 
       case NETMSGTYPE_SetMirrorBuddyGroup: { msg = new SetMirrorBuddyGroupMsgEx(); } break;
       case NETMSGTYPE_SetTargetConsistencyStates: { msg = new SetTargetConsistencyStatesMsgEx(); } break;
       case NETMSGTYPE_SetTargetConsistencyStatesResp: { msg = new SetTargetConsistencyStatesRespMsg(); } break;
+      case NETMSGTYPE_Handshake: { msg = new HandshakeMsgEx(); } break;
+
 
       // storage messages
 
@@ -224,6 +228,7 @@ std::unique_ptr<NetMessage> NetMessageFactory::createFromMsgType(unsigned short 
       case NETMSGTYPE_FindOwner: { msg = new FindOwnerMsgEx(); } break;
       case NETMSGTYPE_FindOwnerResp: { msg = new FindOwnerRespMsg(); } break;
       case NETMSGTYPE_GetChunkFileAttribsResp: { msg = new GetChunkFileAttribsRespMsg(); } break;
+      case NETMSGTYPE_ReadInvalidations: { msg = new ReadInvalidationsMsgEx(); } break;
       case NETMSGTYPE_GetEntryInfo: { msg = new GetEntryInfoMsgEx(); } break;
       case NETMSGTYPE_GetEntryInfoResp: { msg = new GetEntryInfoRespMsg(); } break;
       case NETMSGTYPE_GetHighResStats: { msg = new GetHighResStatsMsgEx(); } break;

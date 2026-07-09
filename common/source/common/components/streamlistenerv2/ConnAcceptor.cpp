@@ -1,5 +1,4 @@
 #include <common/app/AbstractApp.h>
-#include <common/components/worker/IncomingDataWork.h>
 #include <common/components/streamlistenerv2/StreamListenerV2.h>
 #include <common/toolkit/StringTk.h>
 #include "ConnAcceptor.h"

@@ -14,6 +14,7 @@
 #include <components/DatagramListener.h>
 #include <components/Flusher.h>
 #include <components/InternodeSyncer.h>
+#include <components/InvalReader.h>
 #include <filesystem/FhgfsOpsPages.h>
 #include <filesystem/FhgfsOpsInode.h>
 #include <net/filesystem/FhgfsOpsCommKit.h>
@@ -44,7 +45,7 @@ static int __App_probe_sockDomain(App* this)
       int port = Config_getConnClientPort(this->cfg);
 
       struct sockaddr_in6 saddr = beegfs_make_sockaddr_in6(addr, port);
-      int err = kernel_connect(sock->sock, beegfs_get_sockaddr(&saddr), sizeof(saddr), 0);
+      int err = beegfs_kernel_connect(sock->sock, beegfs_get_sockaddr(&saddr), sizeof(saddr), 0);
 
       if (err == -EADDRNOTAVAIL)
       {
@@ -68,8 +69,10 @@ static int __App_probe_sockDomain(App* this)
  * @param mountConfig belongs to the app afterwards (and will automatically be destructed
  * by the app)
  */
-void App_init(App* this, MountConfig* mountConfig)
+void App_init(App* this, struct super_block *sb, MountConfig* mountConfig)
 {
+   this->superBlock = sb;
+
    this->mountConfig = mountConfig;
 
    this->appResult = APPCODE_NO_ERROR;
@@ -106,6 +109,11 @@ void App_init(App* this, MountConfig* mountConfig)
    this->internodeSyncer = NULL;
    this->ackManager = NULL;
    this->flusher = NULL;
+   this->invalReader = NULL;
+
+   atomic64_set(&this->inodeCacheHits, 0);
+   atomic64_set(&this->inodeCacheMisses, 0);
+   atomic64_set(&this->numRemoteInvals, 0);
 
    this->fileInodeOps = NULL;
    this->symlinkInodeOps = NULL;
@@ -133,9 +141,11 @@ void App_uninit(App* this)
    SAFE_DESTRUCT(this->internodeSyncer, InternodeSyncer_destruct);
    SAFE_DESTRUCT(this->dgramListener, DatagramListener_destruct);
 
+   SAFE_DESTRUCT(this->invalReader, InvalReader_destruct);
    SAFE_DESTRUCT(this->storageNodes, NodeStoreEx_destruct);
    SAFE_DESTRUCT(this->metaNodes, NodeStoreEx_destruct);
    SAFE_DESTRUCT(this->mgmtNodes, NodeStoreEx_destruct);
+
 
    if(this->logger)
       Logger_setAllLogLevels(this->logger, LOG_NOTHING); // disable logging
@@ -291,6 +301,7 @@ bool __App_initDataObjects(App* this, MountConfig* mountConfig)
    size_t numMsgBufs;
    size_t msgBufsSize;
    AtomicInt_init(&this->lockAckAtomicCounter, 0);
+   AtomicInt_init(&this->invalWatchFallback, 0); //initialize caching fallback flag to zero
 
    this->cfg = Config_construct(mountConfig);
    if(!this->cfg)
@@ -556,16 +567,19 @@ bool __App_initInodeOperations(App* this)
 #if defined(KERNEL_HAS_SET_ACL) || defined(KERNEL_HAS_SET_ACL_DENTRY)
          this->fileInodeOps->set_acl = FhgfsOps_set_acl;
          this->dirInodeOps->set_acl  = FhgfsOps_set_acl;
+         this->specialInodeOps->set_acl = FhgfsOps_set_acl;
         /* Note: symlinks don't have ACLs
          * The get_acl() operation was introduced as get_inode_acl() in the struct inode_operations in Linux 6.2
          */
 #if defined(KERNEL_HAS_GET_ACL)
          this->fileInodeOps->get_acl = FhgfsOps_get_acl;
          this->dirInodeOps->get_acl  = FhgfsOps_get_acl;
+         this->specialInodeOps->get_acl = FhgfsOps_get_acl;
 #endif
 #if defined(KERNEL_HAS_GET_INODE_ACL)
          this->fileInodeOps->get_inode_acl = FhgfsOps_get_inode_acl;
          this->dirInodeOps->get_inode_acl  = FhgfsOps_get_inode_acl;
+         this->specialInodeOps->get_inode_acl = FhgfsOps_get_inode_acl;
 #endif
 #else
          Logger_logErr(this->logger, "Init inode operations",
@@ -655,6 +669,10 @@ char* App_cloneFsUUID(App* this)
 void App_updateFsUUID(App* this, const char* fsUUID)
 {
    Mutex_lock(&this->fsUUIDMutex);
+   // free any previously stored UUID (allocated via StringTk_strDup) before replacing it to make
+   // sure we don't leak memory on re-registration with mgmtd
+   if (this->fsUUID)
+      kfree(this->fsUUID);
    this->fsUUID = StringTk_strDup(fsUUID);
    Mutex_unlock(&this->fsUUIDMutex);
 }
@@ -779,8 +797,19 @@ bool __App_initLocalNodeInfo(App* this)
    alias[32] = '\0';
 
    // note: numeric ID gets initialized with 0; will be set by management later in InternodeSyncer
-   this->localNode = Node_construct(this, alias, (NumNodeID){0},
-      Config_getConnClientPort(this->cfg), 0, &nicList, NULL);
+   {
+      Node_InitParams params = {0};
+      params.app = this;
+      params.nodeID = alias;
+      params.nodeNumID = (NumNodeID) {0};
+      params.nodeType = NODETYPE_Client;
+      params.portUDP = Config_getConnClientPort(this->cfg);
+      params.portTCP = 0;
+      params.nicList = &nicList;
+      params.localRdmaNicList = NULL;
+
+      this->localNode = Node_construct(&params);
+   }
 
    // clean up
    kfree(generatedAlias);
@@ -815,6 +844,17 @@ bool __App_initComponents(App* this)
 
    this->flusher = Flusher_construct(this);
 
+   if (Config_getSysRemoteInvalEnabled(this->cfg))
+   {
+      InvalReader_construct(this);
+      if (!this->invalReader)
+      {
+         Logger_logErr(this->logger, logContext,
+         "Initialization of InvalReader component failed");
+         App_setInvalWatchFallback(this); /* keep mount alive with fallback caching */
+      }
+   }
+
    Logger_log(this->logger, Log_DEBUG, logContext, "Components initialized.");
 
    return true;
@@ -834,8 +874,12 @@ void __App_startComponents(App* this)
    if(Config_getTuneFileCacheTypeNum(this->cfg) == FILECACHETYPE_Buffered)
       Thread_start( (Thread*)this->flusher);
 
+   if (this->invalReader)
+     Thread_start( (Thread*)this->invalReader);
+
    Logger_log(this->logger, Log_DEBUG, logContext, "Components running.");
 }
+
 
 void __App_stopComponents(App* this)
 {
@@ -848,6 +892,12 @@ void __App_stopComponents(App* this)
       Thread_selfTerminate( (Thread*)this->flusher);
    if(this->ackManager)
       Thread_selfTerminate( (Thread*)this->ackManager);
+
+   if(this->invalReader)
+   {
+      InvalReader_stopInvalReader(this->invalReader);
+   }
+
    if(this->internodeSyncer)
       Thread_selfTerminate( (Thread*)this->internodeSyncer);
 
@@ -862,13 +912,12 @@ void __App_joinComponents(App* this)
    if(this->logger)
       Logger_log(this->logger, 4, logContext, "Waiting for components to self-terminate...");
 
-
    if(Config_getTuneFileCacheTypeNum(this->cfg) == FILECACHETYPE_Buffered)
       __App_waitForComponentTermination(this, (Thread*)this->flusher);
 
    __App_waitForComponentTermination(this, (Thread*)this->ackManager);
+   __App_waitForComponentTermination(this, (Thread*)this->invalReader);
    __App_waitForComponentTermination(this, (Thread*)this->internodeSyncer);
-
    __App_waitForComponentTermination(this, (Thread*)this->dgramListener);
 }
 
@@ -880,7 +929,7 @@ void __App_waitForComponentTermination(App* this, Thread* component)
 {
    const char* logContext = "App (wait for component termination)";
 
-   const int timeoutMS = 2000;
+   const int timeoutMS = 4000;
 
    bool isTerminated;
 

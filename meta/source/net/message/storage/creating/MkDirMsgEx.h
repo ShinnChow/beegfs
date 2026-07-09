@@ -36,7 +36,8 @@ class MkDirMsgEx : public MirroredMessage<MkDirMsg, std::tuple<HashDirLock, File
          const EntryInfo* entryInfo, const bool isBuddyMirrored);
 
       FhgfsOpsErr mkRemoteDirInode(DirInode& parentDir, const std::string& name,
-         EntryInfo* entryInfo, const CharVector& defaultACLXAttr, const CharVector& accessACLXAttr);
+         EntryInfo* entryInfo, const CharVector& defaultACLXAttr, const CharVector& accessACLXAttr,
+         const CharVector& nfs4ACLXAttr);
       FhgfsOpsErr mkRemoteDirCompensate(EntryInfo* entryInfo);
 
       void forwardToSecondary(ResponseContext& ctx) override;

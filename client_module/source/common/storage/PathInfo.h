@@ -50,6 +50,9 @@ struct PathInfo
    union
    {
          const unsigned flags;          // additional flags (e.g. PATHINFO_FEATURE_INLINED)
+                                        // Note: the C++ server serializes this as int32_t; only
+                                        // bits 0-2 are used so unsigned vs signed makes no
+                                        // practical difference on the wire.
          unsigned _flags;
    };
 

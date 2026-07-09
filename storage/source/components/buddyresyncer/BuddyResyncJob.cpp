@@ -16,7 +16,8 @@ BuddyResyncJob::BuddyResyncJob(uint16_t targetID) :
    PThread("BuddyResyncJob_" + StringTk::uintToStr(targetID)),
    targetID(targetID),
    status(BuddyResyncJobState_NOTSTARTED),
-   startTime(0), endTime(0)
+   startTime(0), endTime(0),
+   syncCandidates(Program::getApp()->getConfig()->getTuneResyncQueueLimit())
 {
    App* app = Program::getApp();
    unsigned numGatherSlaves = app->getConfig()->getTuneNumResyncGatherSlaves();
@@ -637,7 +638,17 @@ bool BuddyResyncJob::checkTopLevelDir(std::string& path, int64_t lastBuddyCommTi
    if(dirMTime > lastBuddyCommTimeSecs)
    { // sync candidate
       ChunkSyncCandidateDir candidate("", targetID);
-      syncCandidates.add(candidate, this);
+      syncCandidates.add(candidate, this,
+         [this](unsigned waitedMS, unsigned queueLen, unsigned queueLimit)
+         {
+            LogContext("BuddyResyncJob").log(Log_WARNING,
+               "Possible deadlock detected while adding directory candidate to queue for targetID "
+               + StringTk::uintToStr(targetID)
+               + "; waitedMS: " + StringTk::uintToStr(waitedMS)
+               + "; queuedEntries: " + StringTk::uintToStr(queueLen)
+               + "; queueLimit: " + StringTk::uintToStr(queueLimit)
+               + "; (hint: try increasing tuneResyncQueueLimit)");
+         });
       numDirsMatched.increase();
    }
 
@@ -707,7 +718,19 @@ bool BuddyResyncJob::walkDirs(std::string chunksPath, std::string relPath, int l
             if(dirMTime > lastBuddyCommTimeSecs)
             { // sync candidate
                ChunkSyncCandidateDir candidate(currentRelPath, targetID);
-               syncCandidates.add(candidate, this);
+               syncCandidates.add(candidate, this,
+                  [this, &currentRelPath](unsigned waitedMS, unsigned queueLen,
+                     unsigned queueLimit)
+                  {
+                     LogContext("BuddyResyncJob").log(Log_WARNING,
+                        "Possible deadlock detected while adding directory candidate to queue for targetID "
+                        + StringTk::uintToStr(targetID)
+                        + "; relativePath: " + currentRelPath
+                        + "; waitedMS: " + StringTk::uintToStr(waitedMS)
+                        + "; queuedEntries: " + StringTk::uintToStr(queueLen)
+                        + "; queueLimit: " + StringTk::uintToStr(queueLimit)
+                        + "; (hint: try increasing tuneResyncQueueLimit)");
+                  });
                numDirsMatched.increase();
             }
 

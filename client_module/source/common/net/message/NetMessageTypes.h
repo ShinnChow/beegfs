@@ -51,6 +51,10 @@
 #define NETMSGTYPE_RemoveBuddyGroupResp              1061
 #define NETMSGTYPE_GetTargetConsistencyStates        1062
 #define NETMSGTYPE_GetTargetConsistencyStatesResp    1063
+#define NETMSGTYPE_Handshake                         1073
+#define NETMSGTYPE_HandshakeResp                     1074
+#define NETMSGTYPE_ReadInvalidations                 1075
+#define NETMSGTYPE_ReadInvalidationsResp             1076
 
 
 // storage messages

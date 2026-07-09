@@ -498,7 +498,7 @@ struct dentry* __FhgfsOpsExport_lookupDentryFromNfsHandle(struct super_block *sb
          {
             FhgfsInode* fhgfsInode = BEEGFS_INODE(inode);
 
-            FhgfsInode_setParentNodeID(fhgfsInode, parentNodeID);
+            FhgfsInode_setParentInfo(fhgfsInode, parentNodeID);
          }
 
          if (statParentEntryID)

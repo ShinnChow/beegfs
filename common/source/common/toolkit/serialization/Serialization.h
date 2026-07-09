@@ -127,7 +127,10 @@ class Serializer
                   && this->bufferOffset + length <= this->bufferSize) )
          {
             if (length > 0) // fixes memcpy nonnull warning
+            {
+               assert(source != NULL);
                std::memcpy(this->buffer + this->bufferOffset, source, length);
+            }
          }
          else
             this->bufferSize = 0;
@@ -348,7 +351,10 @@ class Deserializer
                && this->bufferOffset + length <= this->bufferSize) )
          {
             if (length > 0) // fixes memcpy nonnull warning
+            {
+               assert(dest);
                std::memcpy(dest, this->buffer + this->bufferOffset, length);
+            }
          }
          else
             setBad();

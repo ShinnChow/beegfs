@@ -45,6 +45,9 @@ class Socket : public Channel
       void connect(const IPAddress& ipaddress, uint16_t port);
       void bind(uint16_t port);
 
+   public: 
+      void* commContext = NULL; // optional context pointer for storing client context
+      void (*commContextCleanupFunc)(void *commContext) = NULL;
 
    protected:
       Socket();

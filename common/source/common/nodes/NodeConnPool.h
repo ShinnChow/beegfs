@@ -1,6 +1,6 @@
 #pragma once
 
-#include <common/app/config/ICommonConfig.h>
+#include <common/app/config/CommonConfig.h>
 #include <common/net/sock/NetworkInterfaceCard.h>
 #include <common/net/sock/PooledSocket.h>
 #include <common/net/sock/StandardSocket.h>

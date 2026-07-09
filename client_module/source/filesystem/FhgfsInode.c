@@ -1,10 +1,34 @@
 #include <app/log/Logger.h>
+#include <common/nodes/MirrorBuddyGroupMapper.h>
 #include <common/toolkit/StringTk.h>
 #include <common/storage/PathInfo.h>
 #include <filesystem/FhgfsOpsHelper.h>
+#include <filesystem/FhgfsOpsInode.h>
+#include <components/InvalReader.h>
 #include "FhgfsOpsSuper.h"
 #include "FhgfsInode.h"
+#include "filesystem/BeeGFSNFS4Acl.h"
+#include <linux/rcupdate.h>
 
+
+static NumNodeID __FhgfsInode_getSessionMetaID(FhgfsInode* this)
+{
+   App* app = FhgfsOps_getApp(this->vfs_inode.i_sb);
+   NumNodeID id = {0};
+
+   if (!this->entryInfo.owner.isGroup)
+      return this->entryInfo.owner.node;
+
+   if (app)
+   {
+      MirrorBuddyGroupMapper* mapper = App_getMetaBuddyGroupMapper(app);
+      if (mapper)
+         id.value = MirrorBuddyGroupMapper_getPrimaryTargetID(mapper,
+            this->entryInfo.owner.group);
+   }
+
+   return id;
+}
 
 /**
  * Called once for initialization of new inodes (and not again if they are recycled) when they
@@ -23,6 +47,8 @@ void FhgfsInode_initOnce(FhgfsInode* fhgfsInode)
    AtomicInt_init(&fhgfsInode->appendFDsOpen, 0);
    RWLock_init(&fhgfsInode->fileCacheLock);
    FhgfsInode_setNumDirtyPages(fhgfsInode, 0);
+
+   fhgfsInode->nfs4_acl_cache = NULL;
 }
 
 /**
@@ -75,6 +101,9 @@ void FhgfsInode_allocInit(FhgfsInode* fhgfsInode)
    fhgfsInode->metaVersion = 0;
    atomic_set(&fhgfsInode->modified, 0);
    atomic_set(&fhgfsInode->coRWInProg, 0);
+   fhgfsInode->localSessionCnt = 0;
+
+   fhgfsInode->nfs4_acl_cache = NULL;
 }
 
 /**
@@ -88,6 +117,29 @@ void FhgfsInode_destroyUninit(FhgfsInode* fhgfsInode)
       inode will ever be recycled. but we definitely need to free all alloc'ed stuff here. */
    int i;
 
+   /* Drop NFS4 ACL cache (safe: inode going away) */
+   {
+      struct BeeGFSNFS4AclCache *old_cache;
+      /* Atomically swap cache pointer to NULL. */
+      old_cache = xchg((struct BeeGFSNFS4AclCache **)&fhgfsInode->nfs4_acl_cache, NULL);
+      if (old_cache)
+      {
+#ifdef LOG_DEBUG_MESSAGES
+         App* app = FhgfsOps_getApp(fhgfsInode->vfs_inode.i_sb);
+         Logger* log = App_getLogger(app);
+         const char* logContext = __func__;
+
+         LOG_DEBUG_FORMATTED(log, Log_DEBUG, logContext,
+            "nfs4acl_cache: destroy ino=%lu drop cache=%p",
+            fhgfsInode->vfs_inode.i_ino, old_cache);
+#endif
+         /* Defer the free to an RCU callback instead of blocking this teardown
+          * (which can run in reclaim context) on a full grace period. The cache
+          * pointer was already xchg'd to NULL above, so no new readers arrive. */
+         call_rcu(&old_cache->rcu, BeeGFSNFS4Acl_freeCacheRcu);
+      }
+   }
+
    EntryInfo_uninit(&fhgfsInode->entryInfo);
 
    PathInfo_uninit(&fhgfsInode->pathInfo);
@@ -100,6 +152,7 @@ void FhgfsInode_destroyUninit(FhgfsInode* fhgfsInode)
    {
       BitStore_uninit(&fhgfsInode->fileHandles[i].firstWriteDone);
    }
+
 }
 
 /**
@@ -137,7 +190,22 @@ FhgfsOpsErr FhgfsInode_referenceHandle(FhgfsInode* this, struct dentry* dentry, 
    { // desired handle exists => return it
       retVal = __FhgfsInode_referenceTrunc(this, app, openFlags, dentry);
       if (retVal == FhgfsOpsErr_SUCCESS && outVersion)
-         retVal = FhgfsOpsRemoting_getFileVersion(app, &this->entryInfo, outVersion);
+      {
+         /* Snapshot entryInfo under entryInfoReadLock before the remote call.
+          * GetFileVersionMsg stores a bare pointer to entryInfo. A concurrent cross-directory
+          * hardlink (or rename) can update entryInfo->fileName via entryInfoWriteLock while
+          * we hold only fileHandlesMutex. If fileName changes between the dry-run inside
+          * NetMessage_getMsgLength and the actual serialization in NetMessage_serialize, the
+          * two passes compute different byte counts. Socket_send_kernel then sends the stale
+          * (shorter) length, delivering a truncated message to meta that fails deserialization.
+          * A stable copy avoids the race without holding any lock over network I/O. */
+         EntryInfo entryInfoCopy;
+         FhgfsInode_entryInfoReadLock(this);
+         EntryInfo_dup(&this->entryInfo, &entryInfoCopy);
+         FhgfsInode_entryInfoReadUnlock(this);
+         retVal = FhgfsOpsRemoting_getFileVersion(app, &entryInfoCopy, outVersion);
+         EntryInfo_uninit(&entryInfoCopy);
+      }
       if(retVal != FhgfsOpsErr_SUCCESS)
          goto err_unlock;
 
@@ -149,7 +217,15 @@ FhgfsOpsErr FhgfsInode_referenceHandle(FhgfsInode* this, struct dentry* dentry, 
    { // rw handle allowed and exists => return it
       retVal = __FhgfsInode_referenceTrunc(this, app, openFlags, dentry);
       if (retVal == FhgfsOpsErr_SUCCESS && outVersion)
-         retVal = FhgfsOpsRemoting_getFileVersion(app, &this->entryInfo, outVersion);
+      {
+         /* Same race fix as above - see comment in desiredHandle branch. */
+         EntryInfo entryInfoCopy;
+         FhgfsInode_entryInfoReadLock(this);
+         EntryInfo_dup(&this->entryInfo, &entryInfoCopy);
+         FhgfsInode_entryInfoReadUnlock(this);
+         retVal = FhgfsOpsRemoting_getFileVersion(app, &entryInfoCopy, outVersion);
+         EntryInfo_uninit(&entryInfoCopy);
+      }
       if(retVal != FhgfsOpsErr_SUCCESS)
          goto err_unlock;
 
@@ -641,17 +717,102 @@ uint64_t FhgfsInode_generateInodeID(struct super_block* sb, const char* entryID,
    }
 }
 
+struct inode* FhgfsInode_GetInodeFromEntryID(struct super_block *sb, char *entryID)
+{
+   ino_t inodeHash;
+   FhgfsInodeComparisonInfo comparisonInfo;
+
+   size_t entryIDLen = strlen(entryID);
+
+   if (strncmp(entryID, META_ROOTDIR_ID_STR, entryIDLen) == 0)
+      inodeHash = BEEGFS_INODE_ROOT_INO;
+   else
+      inodeHash = FhgfsInode_generateInodeID(sb, entryID, entryIDLen);
+
+   comparisonInfo.inodeHash = inodeHash;
+   comparisonInfo.entryID = entryID;
+
+   return ilookup5(sb, inodeHash, __FhgfsOps_compareInodeID,
+      &comparisonInfo);
+}
+
+//caller must already hold entryInfoLock
+void FhgfsInode_setCacheValidUnlocked(FhgfsInode* this)
+{
+   FhgfsInode_setLocalSessionCnt(this);
+   FhgfsInode_setValid(this);
+}
+
+
+void FhgfsInode_setCacheValid(FhgfsInode* this)
+{
+   App* app = FhgfsOps_getApp(this->vfs_inode.i_sb);
+
+   if (!app->invalReader || App_getInvalWatchFallback(app) )
+   {
+      //avoid taking entryInfoLock if invalReader feature is off
+      FhgfsInode_setValid(this);
+      return;
+   }
+
+   FhgfsInode_entryInfoWriteLock(this);
+   FhgfsInode_setCacheValidUnlocked(this);
+   FhgfsInode_entryInfoWriteUnlock(this);
+}
+
+void FhgfsInode_setLocalSessionCnt(FhgfsInode* this)
+{
+   App* app = FhgfsOps_getApp(this->vfs_inode.i_sb);
+   InvalReader* inval = app ? app->invalReader : NULL;
+   NumNodeID sid;
+   if (!inval)
+      return;
+   sid = __FhgfsInode_getSessionMetaID(this);
+
+   this->localSessionCnt = InvalReader_getMetaSessionCnt(inval, sid);
+}
+unsigned FhgfsInode_getCacheValidityMS(umode_t i_mode, Config* cfg)
+{
+   if(S_ISDIR(i_mode) )
+      return Config_getTuneDirSubentryCacheValidityMS(cfg); // defaults to 1s
+
+   return Config_getTuneFileSubentryCacheValidityMS(cfg); // defaults to 0
+}
 bool FhgfsInode_isCacheValid(FhgfsInode* this, umode_t i_mode, Config* cfg)
 {
    unsigned cacheValidityMS;
    unsigned cacheElapsedMS;
    bool cacheValid;
+   App* app = FhgfsOps_getApp(this->vfs_inode.i_sb);
+   if (Config_getSysRemoteInvalEnabled(cfg) && !App_getInvalWatchFallback(app))
+   {
+      FhgfsInode_entryInfoReadLock(this);
+      cacheValid = FhgfsInode_isValid(this);
+      if (cacheValid &&  app->invalReader)
+      {
+         NumNodeID sid = __FhgfsInode_getSessionMetaID(this);
+         int32_t currSessionCnt = InvalReader_getMetaSessionCnt(app->invalReader, sid);
+         //check if sessionCnt is odd (valid) and if it changed
+         cacheValid = ((currSessionCnt & 1) == 1) && ((this->localSessionCnt & 1) == 1) && (currSessionCnt == this->localSessionCnt);
+      }
+      FhgfsInode_entryInfoReadUnlock(this);
 
+      if (cacheValid)
+         atomic64_inc(&app->inodeCacheHits);
+      else
+         atomic64_inc(&app->inodeCacheMisses);
 
-   if(S_ISDIR(i_mode) )
-      cacheValidityMS = Config_getTuneDirSubentryCacheValidityMS(cfg); // defaults to 1s
-   else
-      cacheValidityMS = Config_getTuneFileSubentryCacheValidityMS(cfg); // defaults to 0
+      #ifdef BEEGFS_DEBUG
+      if (!cacheValid)
+      {
+         LOG_DEBUG_FORMATTED(app->logger, Log_DEBUG, __func__, "Found invalidated inode %s", this->entryInfo.entryID);
+      }
+      #endif
+      return cacheValid;
+   }
+   // Fallback to default timeout mechanism for cache invalidation.
+   cacheValidityMS = FhgfsInode_getCacheValidityMS(i_mode, cfg);
+
 
    if(!cacheValidityMS) // caching disabled
       cacheValid = false;
@@ -662,4 +823,14 @@ bool FhgfsInode_isCacheValid(FhgfsInode* this, umode_t i_mode, Config* cfg)
    }
 
    return cacheValid;
+}
+
+void FhgfsInode_setParentInfo(FhgfsInode* this, NumNodeID parentNodeID)
+{
+   FhgfsInode_entryInfoWriteLock(this);
+
+   FhgfsInode_setParentNodeID(this, parentNodeID);
+   FhgfsInode_setLocalSessionCnt(this);
+
+   FhgfsInode_entryInfoWriteUnlock(this);
 }

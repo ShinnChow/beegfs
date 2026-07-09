@@ -1,3 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+/*
+ * Copyright (c) 2009 Fraunhofer ITWM, 2022 ThinkParQ GmbH
+ *
+ * BeeGFS client userspace API (ioctl ABI).
+ *
+ * This header is licensed GPL-2.0 WITH Linux-syscall-note. The syscall-note
+ * exception means userspace programs that use this header to issue ioctls to
+ * the BeeGFS client kernel module are not derivative works of the module and
+ * may carry any license. See https://spdx.org/licenses/Linux-syscall-note.html
+ */
 #ifndef _BEEGFS_CLIENT_H_INCLUDED
 #define _BEEGFS_CLIENT_H_INCLUDED
 
@@ -15,6 +26,11 @@
 // entryID string is made of three 32 bit values in hexadecimal form plus two dashes
 // (see common/toolkit/StorageTk.h)
 #define BEEGFS_IOCTL_ENTRYID_MAXLEN     26
+
+// Stripe targets: matches DIRINODE_MAX_STRIPE_TARGETS enforced by the meta server.
+// RST IDs: no hard server-side limit; 256 is chosen to match stripe targets.
+#define BEEGFS_IOCTL_MAX_STRIPE_TARGETS 256
+#define BEEGFS_IOCTL_MAX_RST_IDS        256
 
 // stripe pattern types
 #define BEEGFS_STRIPEPATTERN_INVALID      0
@@ -61,6 +77,7 @@
 #define BEEGFS_IOCNUM_GETENTRYINFO           31
 #define BEEGFS_IOCNUM_PINGNODE               32
 #define BEEGFS_IOCNUM_SET_FILE_STATE         33 // set accessFlags and dataState on a file
+#define BEEGFS_IOCNUM_GETENTRYINFO_V2        34 // get full entry info via RPC to meta
 
 #define BEEGFS_IOC_GETVERSION     _IOR( \
    BEEGFS_IOCTYPE_ID, BEEGFS_IOCNUM_GETVERSION, long)
@@ -98,6 +115,8 @@
    BEEGFS_IOCTYPE_ID, BEEGFS_IOCNUM_PINGNODE, struct BeegfsIoctl_PingNode_Arg)
 #define BEEGFS_IOC_SET_FILE_STATE _IOW( \
    BEEGFS_IOCTYPE_ID, BEEGFS_IOCNUM_SET_FILE_STATE, struct BeegfsIoctl_SetFileState_Arg)
+#define BEEGFS_IOC_GETENTRYINFO_V2 _IOWR( \
+   BEEGFS_IOCTYPE_ID, BEEGFS_IOCNUM_GETENTRYINFO_V2, struct BeegfsIoctl_GetEntryInfoV2_Arg)
 
 /* used to return the client config file path using an IOCTL */
 struct BeegfsIoctl_GetCfgFile_Arg
@@ -303,6 +322,76 @@ struct BeegfsIoctl_SetFileState_Arg
 {
    char filename[BEEGFS_IOCTL_FILENAME_MAXLEN];
    uint8_t fileState; // combined AccessFlags and DataState
+};
+
+/*
+ * V2 entry info: returns comprehensive entry information including stripe pattern,
+ * path info, RST, session counts, and file state in a single ioctl call.
+ *
+ * The fd passed to this ioctl MUST be an open directory.  If 'filename' is
+ * non-empty it names a direct child (file or sub-directory) of that directory;
+ * the kernel sends a LookupIntent RPC to meta to resolve the child and uses its
+ * EntryInfo for the subsequent GetEntryInfo RPC.  If 'filename' is empty ("") the
+ * ioctl queries the directory fd itself (using the fd's cached EntryInfo).
+ *
+ * Design note on variable-length data:
+ *   BeeGFS entries (files and directories) may have a variable number of stripe targets and RST IDs.
+ *   Since ioctl arguments must be a fixed size known at compile time, both
+ *   stripeTargetIDs[] and rstIds[] are pre-allocated to BEEGFS_IOCTL_MAX_STRIPE_TARGETS
+ *   and BEEGFS_IOCTL_MAX_RST_IDS (256 each) entries respectively. Only the first
+ *   numTargets / numRSTIds entries are valid. If the actual count exceeds the cap,
+ *   the kernel logs a warning and truncates to the maximum.
+ *
+ * Note: storagePoolId reflects the storage pool ID stored in the kernel StripePattern,
+ *   which is populated during deserialization via StripePattern_createFromBuf().
+ */
+struct BeegfsIoctl_GetEntryInfoV2_Arg
+{
+   /* Input/output: name of a direct child to query, relative to the fd directory.
+    * Leave empty (filename[0] == '\0') to query the directory fd itself.
+    * Must not contain '/' or exceed NAME_MAX characters.
+    * On success the kernel writes back the resolved entryInfo->fileName:
+    *   - if non-empty on input: overwritten with the canonical name from meta
+    *   - if empty on input: filled with the directory's own name */
+   char filename[BEEGFS_IOCTL_FILENAME_MAXLEN];
+
+   /* Basic entry info (same as V1) */
+   uint32_t ownerID;
+   char parentEntryID[BEEGFS_IOCTL_ENTRYID_MAXLEN + 1];
+   char entryID[BEEGFS_IOCTL_ENTRYID_MAXLEN + 1];
+   int entryType;
+   int featureFlags;
+
+   /* Stripe pattern */
+   uint32_t patternType;
+   uint32_t chunkSize;
+   uint32_t storagePoolId;
+   uint32_t defaultNumTargets;
+   uint16_t numTargets;
+   uint16_t stripeTargetIDs[BEEGFS_IOCTL_MAX_STRIPE_TARGETS];
+
+   /* PathInfo */
+   uint32_t pathInfoFlags;
+   uint32_t origParentUID;
+   char origParentEntryID[BEEGFS_IOCTL_ENTRYID_MAXLEN + 1];
+
+   /* Remote Storage Target (RST) */
+   uint8_t  rstMajorVersion;
+   uint8_t  rstMinorVersion;
+   uint16_t rstCoolDownPeriod;
+   uint16_t rstFilePolicies;
+   uint32_t numRSTIds;
+   uint32_t rstIds[BEEGFS_IOCTL_MAX_RST_IDS];
+
+   /* Session and state info */
+   uint32_t numSessionsRead;
+   uint32_t numSessionsWrite;
+   uint8_t  fileDataState;
+   /* Result of the GetEntryInfo RPC. Zero (FhgfsOpsErr_SUCCESS) means full
+    * data is populated. A non-zero error value indicates a partial result;
+    * only the basic entry info fields above are valid. Non-zero values are
+    * FhgfsOpsErr codes */
+   int32_t  getEntryInfoResult;
 };
 
 #endif

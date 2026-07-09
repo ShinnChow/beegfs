@@ -439,6 +439,7 @@ FhgfsOpsErr FsckTkEx::startModificationLogging(NodeStore* metaNodes, Node& local
    FsckTkEx::fsckOutput("-----", OutputOptions_FLUSH | OutputOptions_DOUBLELINEBREAK);
 
    NumNodeIDList nodeIDs;
+   NumNodeIDList enabledNodes; // track nodes where logging was successfully started
 
    auto metaNodeList = metaNodes->referenceAllNodes();
 
@@ -467,11 +468,34 @@ FhgfsOpsErr FsckTkEx::startModificationLogging(NodeStore* metaNodes, Node& local
             retVal = FhgfsOpsErr_INUSE;
             break;
          }
+
+         enabledNodes.push_back((*iter)->getNumID());
       }
       else
       {
          LogContext(logContext).logErr("Communication error occured with node: " + node->getAlias());
          retVal = FhgfsOpsErr_COMMUNICATION;
+      }
+   }
+
+   // If logging could not be started on all nodes (e.g. another fsck instance previously crashed
+   // and left modification logging running on some nodes), stop it on the nodes that were already
+   // successfully enabled. Without this, those nodes would continue sending modification events
+   // via UDP to our DGramListener even after we set the ModificationEventHandler to null in the
+   // caller, causing a null pointer dereference when an incoming event is processed.
+   // This covers both INUSE (another instance running) and COMMUNICATION (network error mid-loop)
+   // failures, since in both cases nodes enabled so far must not be left in logging state.
+   if (retVal != FhgfsOpsErr_SUCCESS && !enabledNodes.empty())
+   {
+      NicAddressList nicList;
+      FsckSetEventLoggingMsg disableMsg(false, 0, &nicList, false);
+
+      for (const auto& nodeID : enabledNodes)
+      {
+         auto node = metaNodes->referenceNode(nodeID);
+         if (node)
+            MessagingTk::requestResponse(*node, disableMsg,
+               NETMSGTYPE_FsckSetEventLoggingResp);
       }
    }
 

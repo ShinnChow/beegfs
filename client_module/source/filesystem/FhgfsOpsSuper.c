@@ -1,6 +1,7 @@
 #include <app/log/Logger.h>
 #include <app/App.h>
 #include <app/config/Config.h>
+#include <app/config/MountConfig.h>
 #include <filesystem/ProcFs.h>
 #include <os/OsCompat.h>
 #include <common/storage/StorageDefinitions.h>
@@ -11,19 +12,22 @@
 #include "FhgfsOps_versions.h"
 #include "FhgfsOpsSuper.h"
 #include "FhgfsOpsInode.h"
-#include "FhgfsOpsFile.h"
 #include "FhgfsOpsDir.h"
 #include "FhgfsOpsPages.h"
 #include "FhgfsOpsExport.h"
 #include "FhgfsXAttrHandlers.h"
+#include <linux/dcache.h>
+#include "filesystem/BeeGFSNFS4Acl.h"
 
-
-static int  __FhgfsOps_initApp(struct super_block* sb, char* rawMountOptions);
+static int  __FhgfsOps_initApp(struct super_block* sb, MountConfig* mountConfig);
 static void __FhgfsOps_uninitApp(App* app);
 
-static int  __FhgfsOps_constructFsInfo(struct super_block* sb, void* rawMountOptions);
+static int  __FhgfsOps_constructFsInfo(struct super_block* sb, MountConfig* mountConfig);
 static void __FhgfsOps_destructFsInfo(struct super_block* sb);
 
+#ifdef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+static int FhgfsOps_initFsContext(struct fs_context* fc);
+#endif
 
 /* read-ahead size is limited by BEEGFS_DEFAULT_READAHEAD_PAGES, so this is the maximum already going
  * to to the server. 32MiB read-head also seems to be a good number. It still may be reduced by
@@ -40,10 +44,14 @@ static struct file_system_type fhgfs_fs_type =
    .fs_flags   = FS_ALLOW_IDMAP,
 #endif
 
+#ifdef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+   .init_fs_context = FhgfsOps_initFsContext,
+#else
 #ifdef KERNEL_HAS_GET_SB_NODEV
    .get_sb     = FhgfsOps_getSB,
 #else
    .mount      = FhgfsOps_mount, // basically the same thing as get_sb before
+#endif
 #endif
 };
 
@@ -52,7 +60,11 @@ static struct super_operations fhgfs_super_ops =
    .statfs        = FhgfsOps_statfs,
    .alloc_inode   = FhgfsOps_alloc_inode,
    .destroy_inode = FhgfsOps_destroy_inode,
+#ifdef KERNEL_HAS_INODE_JUST_DROP
+   .drop_inode    = inode_just_drop,
+#else
    .drop_inode    = generic_drop_inode,
+#endif
    .put_super     = FhgfsOps_putSuper,
    .show_options  = FhgfsOps_showOptions,
 };
@@ -60,27 +72,15 @@ static struct super_operations fhgfs_super_ops =
 /**
  * Creates and initializes the per-mount application object.
  */
-int __FhgfsOps_initApp(struct super_block* sb, char* rawMountOptions)
+int __FhgfsOps_initApp(struct super_block* sb, MountConfig* mountConfig)
 {
-   MountConfig* mountConfig;
-   bool parseRes;
    App* app;
    int appRes;
-
-   // create mountConfig (parse from mount options)
-   mountConfig = MountConfig_construct();
-
-   parseRes = MountConfig_parseFromRawOptions(mountConfig, rawMountOptions);
-   if(!parseRes)
-   {
-      MountConfig_destruct(mountConfig);
-      return APPCODE_INVALID_CONFIG;
-   }
 
    //printk_fhgfs(KERN_INFO, "Initializing App...\n"); // debug in
 
    app = FhgfsOps_getApp(sb);
-   App_init(app, mountConfig);
+   App_init(app, sb, mountConfig);
 
    appRes = App_run(app);
 
@@ -135,7 +135,7 @@ int FhgfsOps_unregisterFilesystem(void)
  *
  * @return 0 on success, negative linux error code otherwise
  */
-int __FhgfsOps_constructFsInfo(struct super_block* sb, void* rawMountOptions)
+int __FhgfsOps_constructFsInfo(struct super_block* sb, MountConfig* mountConfig)
 {
    int res;
    int appRes;
@@ -154,12 +154,17 @@ int __FhgfsOps_constructFsInfo(struct super_block* sb, void* rawMountOptions)
    {
       printk_fhgfs_debug(KERN_INFO, "Failed to allocate memory for FhgfsSuperBlockInfo");
       sb->s_fs_info = NULL;
+      MountConfig_destruct(mountConfig);
       return -ENOMEM;
    }
 
    sb->s_fs_info = sbInfo;
 
-   appRes = __FhgfsOps_initApp(sb, rawMountOptions);
+   /*
+    * __FhgfsOps_initApp() transfers mountConfig ownership to App via App_init().
+    * From that point on, App_uninit() releases it on both init failure and unmount.
+    */
+   appRes = __FhgfsOps_initApp(sb, mountConfig);
    if(appRes)
    {
       printk_fhgfs_debug(KERN_INFO, "Failed to initialize App object");
@@ -171,16 +176,17 @@ int __FhgfsOps_constructFsInfo(struct super_block* sb, void* rawMountOptions)
    log = App_getLogger(app);
    IGNORE_UNUSED_VARIABLE(log);
 
-#if defined(KERNEL_HAS_SB_BDI)
-
-   #if defined(KERNEL_HAS_SUPER_SETUP_BDI_NAME) && !defined(KERNEL_HAS_BDI_SETUP_AND_REGISTER)
+#if defined(KERNEL_HAS_SUPER_SETUP_BDI_NAME)
    {
       static atomic_long_t bdi_seq = ATOMIC_LONG_INIT(0);
 
+      /* NOTE: super_setup_bdi_name() allocates and registers the per-superblock
+       *       BDI. Use it when available so filemap writeback can call ->writepages.
+       */
       res = super_setup_bdi_name(sb, BEEGFS_MODULE_NAME_STR "-%ld",
             atomic_long_inc_return(&bdi_seq));
    }
-   #else
+#elif defined(KERNEL_HAS_SB_BDI)
       bdi = &sbInfo->bdi;
 
       /* NOTE: The kernel expects a fully initialized bdi structure, so at a minimum it has to be
@@ -190,13 +196,14 @@ int __FhgfsOps_constructFsInfo(struct super_block* sb, void* rawMountOptions)
        */
       bdi->ra_pages = BEEGFS_DEFAULT_READAHEAD_PAGES;
 
-      #if defined(KERNEL_HAS_BDI_CAP_MAP_COPY) 
+      #if defined(KERNEL_HAS_BDI_CAP_MAP_COPY)
          res = bdi_setup_and_register(bdi, BEEGFS_MODULE_NAME_STR, BDI_CAP_MAP_COPY);
       #else
          res = bdi_setup_and_register(bdi, BEEGFS_MODULE_NAME_STR);
       #endif
-   #endif
+#endif
 
+#if defined(KERNEL_HAS_SUPER_SETUP_BDI_NAME) || defined(KERNEL_HAS_SB_BDI)
    if (res)
    {
       Logger_logFormatted(log, 2, __func__, "Failed to init super-block (bdi) information: %d",
@@ -236,7 +243,7 @@ void __FhgfsOps_destructFsInfo(struct super_block* sb)
 //call destroy iff not initialised/registered by super_setup_bdi_name
 #if defined(KERNEL_HAS_SB_BDI)
 
-#if !defined(KERNEL_HAS_SUPER_SETUP_BDI_NAME) || defined(KERNEL_HAS_BDI_SETUP_AND_REGISTER)
+#if !defined(KERNEL_HAS_SUPER_SETUP_BDI_NAME)
       struct backing_dev_info* bdi = FhgfsOps_getBdi(sb);
 
       bdi_destroy(bdi);
@@ -256,7 +263,7 @@ void __FhgfsOps_destructFsInfo(struct super_block* sb)
 /**
  * Fill the file system superblock (vfs object)
  */
-int FhgfsOps_fillSuper(struct super_block* sb, void* rawMountOptions, int silent)
+static int __FhgfsOps_fillSuperCommon(struct super_block* sb, MountConfig* mountConfig)
 {
    App* app = NULL;
    Config* cfg = NULL;
@@ -268,9 +275,16 @@ int FhgfsOps_fillSuper(struct super_block* sb, void* rawMountOptions, int silent
 
    FhgfsIsizeHints iSizeHints;
 
+#if defined(KERNEL_HAS_CONST_XATTR_HANDLER) || defined(KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER)
+   const struct xattr_handler* *fhgfs_xattr_handlers;
+#else
+   struct xattr_handler* *fhgfs_xattr_handlers;
+#endif
+   int num_handlers = 0;
+
    // init per-mount app object
 
-   if(__FhgfsOps_constructFsInfo(sb, rawMountOptions) )
+   if(__FhgfsOps_constructFsInfo(sb, mountConfig) )
       return -ECANCELED;
 
    app = FhgfsOps_getApp(sb);
@@ -290,25 +304,53 @@ int FhgfsOps_fillSuper(struct super_block* sb, void* rawMountOptions, int silent
    sb->s_flags |= MS_NODIRATIME;
 #endif
 
-   if (Config_getSysACLsEnabled(cfg) && Config_getsysSELinuxEnabled(cfg))
+   // NOTE: This code assumes that we will never add more than 31 handlers and a NULL sentinel at
+   // the end of the array. If we add more, we need to malloc a bigger array in the next line!
+   fhgfs_xattr_handlers = kmalloc_array(32, sizeof(void *), GFP_KERNEL);
+   if (!fhgfs_xattr_handlers)
    {
-      sb->s_xattr = fhgfs_xattr_handlers;
+      __FhgfsOps_destructFsInfo(sb);
+      return -ENOMEM;
    }
-   else if (Config_getSysACLsEnabled(cfg))
+
+   if (Config_getSysXAttrsEnabled(cfg))
    {
-      sb->s_xattr = fhgfs_xattr_handlers_acl;
+      fhgfs_xattr_handlers[num_handlers++] = &fhgfs_xattr_user_handler;
    }
-   else if (Config_getsysSELinuxEnabled(cfg))
+#ifdef KERNEL_HAS_GET_ACL
+   if (Config_getSysACLsEnabled(cfg))
    {
-      sb->s_xattr = fhgfs_xattr_handlers_selinux;
+      fhgfs_xattr_handlers[num_handlers++] = &fhgfs_xattr_acl_access_handler;
+      fhgfs_xattr_handlers[num_handlers++] = &fhgfs_xattr_acl_default_handler;
    }
-   else if (Config_getSysXAttrsEnabled(cfg))
+#endif
+   if (Config_getSysNFSv4ACLsEnabled(cfg))
    {
-      sb->s_xattr = fhgfs_xattr_handlers_noacl;
+      fhgfs_xattr_handlers[num_handlers++] = &beegfsXAttrNfs4AclHandler;
+      BeeGFSNFS4Acl_initResolvers();
+   }
+   if (Config_getsysSELinuxEnabled(cfg))
+   {
+      fhgfs_xattr_handlers[num_handlers++] = &fhgfs_xattr_security_handler;
+   }
+
+   printk_fhgfs_debug(KERN_DEBUG, "REGISTER_HANDLERS: Number of registered handlers: %d", num_handlers);
+   if (num_handlers == 0)
+   {
+      // No xattr handlers configured: don't advertise an (empty) handler array to the
+      // VFS; leave sb->s_xattr NULL as it was before the handler array became dynamic.
+      kfree(fhgfs_xattr_handlers);
+      sb->s_xattr = NULL;
    }
    else
    {
-       sb->s_xattr = NULL;
+      void *resized;
+      fhgfs_xattr_handlers[num_handlers++] = NULL; // NULL sentinel terminates the array
+      // Shrink to fit; on failure keep the original (larger) block rather than leaking it.
+      resized = krealloc(fhgfs_xattr_handlers, num_handlers * sizeof(void *), GFP_KERNEL);
+      if (resized)
+         fhgfs_xattr_handlers = resized;
+      sb->s_xattr = fhgfs_xattr_handlers;
    }
 
 #ifdef KERNEL_HAS_GET_ACL
@@ -372,18 +414,148 @@ int FhgfsOps_fillSuper(struct super_block* sb, void* rawMountOptions, int silent
       return -ENOMEM;
    }
 
-#ifdef KERNEL_HAS_S_D_OP
+#ifdef KERNEL_HAS_SET_DEFAULT_D_OP
+   /* Newer kernels use set_default_d_op() so the superblock's default dentry flags
+    * stay in sync with the default dentry operations.
+    */
+   set_default_d_op(sb, &fhgfs_dentry_ops);
+#elif defined(KERNEL_HAS_S_D_OP)
    // linux 2.6.38 switched from individual per-dentry to defaul superblock d_ops.
    /* note: Only set default dentry operations here, as we don't want those OPs set for the root
     * dentry. In fact, setting as before would only slow down everything a bit, due to
     * useless revalidation of our root dentry. */
    sb->s_d_op = &fhgfs_dentry_ops;
-#endif // KERNEL_HAS_S_D_OP
+#endif //KERNEL_HAS_SET_DEFAULT_D_OP || KERNEL_HAS_S_D_OP
    rootDentry->d_time = jiffies;
    sb->s_root = rootDentry;
 
    return 0;
 }
+
+#ifdef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+struct FhgfsOps_fs_context
+{
+   MountConfig* mountConfig;
+};
+
+/*
+ * parse_param:
+ * Called by VFS for each filesystem-specific mount option. We store options
+ * in fc->fs_private so they can be used during superblock creation.
+ *
+ * get_tree:
+ * This is where the filesystem builds the superblock. We call get_tree_nodev(),
+ * which invokes our fc_fillSuper helper to populate sb using the stored options.
+ *
+ * free:
+ * Cleanup hook for per-mount state allocated during init_fs_context and
+ * parse_param. We free fc->fs_private and any strings we allocated.
+ *
+ * No parse_monolithic callback: the VFS generic parser splits legacy
+ * comma-separated options and routes them through parse_param.
+ *
+ * VFS mount API reference:
+ * https://docs.kernel.org/filesystems/mount_api.html
+ */
+static int FhgfsOps_fc_parse_param(struct fs_context* fc, struct fs_parameter* param)
+{
+   struct FhgfsOps_fs_context* ctx = fc->fs_private;
+
+   if (!ctx || !ctx->mountConfig)
+      return -EINVAL;
+
+   return MountConfig_parseParam(ctx->mountConfig, fc, param);
+}
+
+static int FhgfsOps_fc_fillSuper(struct super_block* sb, struct fs_context* fc)
+{
+   struct FhgfsOps_fs_context* ctx = fc->fs_private;
+   MountConfig* mountConfig;
+
+   if (!ctx || !ctx->mountConfig)
+      return -EINVAL;
+
+   mountConfig = ctx->mountConfig;
+
+   /*
+    * mountConfig is now handed to the common superblock setup path. Clear the
+    * fs_context pointer so FhgfsOps_fc_free() does not destroy the same object
+    * during VFS cleanup.
+    */
+   ctx->mountConfig = NULL;
+
+   return __FhgfsOps_fillSuperCommon(sb, mountConfig);
+}
+
+static int FhgfsOps_fc_get_tree(struct fs_context* fc)
+{
+   return get_tree_nodev(fc, FhgfsOps_fc_fillSuper);
+}
+
+static void FhgfsOps_fc_free(struct fs_context* fc)
+{
+   struct FhgfsOps_fs_context* ctx = fc->fs_private;
+
+   if (!ctx)
+      return;
+
+   /*
+    * mountConfig is non-NULL only if superblock setup did not take ownership
+    * in FhgfsOps_fc_fillSuper().
+    */
+   if (ctx->mountConfig)
+      MountConfig_destruct(ctx->mountConfig);
+   kfree(ctx);
+   fc->fs_private = NULL;
+}
+
+static const struct fs_context_operations fhgfs_context_ops =
+{
+   .parse_param      = FhgfsOps_fc_parse_param,
+   .get_tree         = FhgfsOps_fc_get_tree,
+   .free             = FhgfsOps_fc_free,
+};
+
+static int FhgfsOps_initFsContext(struct fs_context* fc)
+{
+   struct FhgfsOps_fs_context* ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+
+   if (!ctx)
+      return -ENOMEM;
+
+   ctx->mountConfig = MountConfig_construct();
+   if (!ctx->mountConfig)
+   {
+      kfree(ctx);
+      return -ENOMEM;
+   }
+
+   fc->fs_private = ctx;
+   fc->ops = &fhgfs_context_ops;
+   return 0;
+}
+#endif
+
+#ifndef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+int FhgfsOps_fillSuper(struct super_block* sb, void* rawMountOptions, int silent)
+{
+   MountConfig* mountConfig;
+
+   (void)silent;
+
+   mountConfig = MountConfig_construct();
+   if(!mountConfig)
+      return -ENOMEM;
+
+   if(!MountConfig_parseFromRawOptions(mountConfig, rawMountOptions))
+   {
+      MountConfig_destruct(mountConfig);
+      return -EINVAL;
+   }
+
+   return __FhgfsOps_fillSuperCommon(sb, mountConfig);
+}
+#endif
 
 /*
  * Called by FhgfsOps_killSB()->kill_anon_super()->generic_shutdown_super()
@@ -420,6 +592,9 @@ void FhgfsOps_killSB(struct super_block* sb)
    }
 #endif
 
+   if (sb->s_xattr)
+      kfree(sb->s_xattr);
+
    kill_anon_super(sb);
 }
 
@@ -441,4 +616,3 @@ extern int FhgfsOps_showOptions(struct seq_file* sf, struct vfsmount* vfs)
 
    return 0;
 }
-

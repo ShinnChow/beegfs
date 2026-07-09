@@ -1,6 +1,7 @@
 #include <common/threading/RWLockGuard.h>
 #include <common/threading/UniqueRWLock.h>
 #include <program/Program.h>
+#include <components/InvalWatch.h>
 #include <storage/PosixACL.h>
 #include "DirInode.h"
 #include "InodeDirStore.h"
@@ -164,6 +165,7 @@ FhgfsOpsErr InodeDirStore::removeDirInode(const std::string& dirID, bool isBuddy
    if(!persistenceOK)
       return FhgfsOpsErr_INTERNAL;
 
+   invalidate_target_by_entryid(dirID);
    return FhgfsOpsErr_SUCCESS;
 }
 
@@ -307,7 +309,13 @@ FhgfsOpsErr InodeDirStore::setAttr(const std::string& dirID, bool isBuddyMirrore
       { // loaded
          bool setRes = dir.setAttrData(validAttribs, attribs);
 
-         return setRes ? FhgfsOpsErr_SUCCESS : FhgfsOpsErr_INTERNAL;
+         if (setRes)
+         {
+            invalidate_target_by_entryid(dirID);
+            return FhgfsOpsErr_SUCCESS;
+         }
+         else
+            return FhgfsOpsErr_INTERNAL;
       }
    }
    else
@@ -319,7 +327,13 @@ FhgfsOpsErr InodeDirStore::setAttr(const std::string& dirID, bool isBuddyMirrore
       {
          bool setRes = dir->setAttrData(validAttribs, attribs);
 
-         return setRes ? FhgfsOpsErr_SUCCESS : FhgfsOpsErr_INTERNAL;
+         if (setRes)
+         {
+            invalidate_target_by_entryid(dirID);
+            return FhgfsOpsErr_SUCCESS;
+         }
+         else
+            return FhgfsOpsErr_INTERNAL;
       }
    }
 

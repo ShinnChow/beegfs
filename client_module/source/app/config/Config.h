@@ -131,6 +131,7 @@ static inline unsigned Config_getTunePageCacheValidityMS(Config* this);
 static inline unsigned Config_getTuneDirSubentryCacheValidityMS(Config* this);
 static inline unsigned Config_getTuneFileSubentryCacheValidityMS(Config* this);
 static inline unsigned Config_getTuneENOENTCacheValidityMS(Config* this);
+static inline bool Config_getSysRemoteInvalEnabled(Config* this);
 static inline bool Config_getTuneRemoteFSync(Config* this);
 static inline bool Config_getTuneUseGlobalFileLocks(Config* this);
 static inline bool Config_getTuneRefreshOnGetAttr(Config* this);
@@ -148,7 +149,6 @@ static inline unsigned Config_getTuneFileOpenRetryIntervalMS(Config* this);
 static inline char* Config_getSysMgmtdHost(Config* this);
 static inline char* Config_getSysInodeIDStyle(Config* this);
 static inline InodeIDStyle Config_getSysInodeIDStyleNum(Config* this);
-static inline bool Config_getSysCacheInvalidationVersion(Config* this);
 static inline bool Config_getSysCreateHardlinksAsSymlinks(Config* this);
 static inline unsigned Config_getSysMountSanityCheckMS(Config* this);
 static inline bool Config_getSysSyncOnClose(Config* this);
@@ -160,6 +160,7 @@ static inline bool Config_getSysXAttrsEnabled(Config* this);
 static inline CheckCapabilities Config_getSysXAttrsCheckCapabilities (Config* this);
 static inline bool Config_getsysSELinuxEnabled(Config* this);
 static inline SELinuxRevalidateMode Config_getsysSELinuxRevalidate (Config* this);
+static inline bool Config_getSysNFSv4ACLsEnabled(Config* this);
 static inline bool Config_getSysACLsEnabled(Config* this);
 static inline ACLsRevalidate Config_getSysACLsRevalidate(Config* this);
 static inline bool Config_getSysXAttrsImplicitlyEnabled(Config* this);
@@ -302,6 +303,7 @@ struct Config
    unsigned       tuneDirSubentryCacheValidityMS;
    unsigned       tuneFileSubentryCacheValidityMS;
    unsigned       tuneENOENTCacheValidityMS;
+   bool           sysRemoteInvalEnabled;
    int            tunePathBufSize;
    int            tunePathBufNum;
    int            tuneMsgBufSize;
@@ -322,7 +324,6 @@ struct Config
    char*          sysMgmtdHost;
    char*          sysInodeIDStyle;
    InodeIDStyle   sysInodeIDStyleNum; // auto-generated based on sysInodeIDStyle
-   bool     sysCacheInvalidationVersion;
    bool     sysCreateHardlinksAsSymlinks;
    unsigned       sysMountSanityCheckMS;
    bool     sysSyncOnClose;
@@ -335,6 +336,7 @@ struct Config
    CheckCapabilities       sysXAttrsCheckCapabilities;
    bool     sysSELinuxEnabled;
    SELinuxRevalidateMode   sysSELinuxRevalidate;
+   bool     sysNFSv4ACLsEnabled;
    bool     sysACLsEnabled;
    ACLsRevalidate   sysACLsRevalidate;
    bool     sysXAttrsImplicitlyEnabled; // True when XAttrs have not been enabled in the config file
@@ -612,6 +614,11 @@ unsigned Config_getTuneENOENTCacheValidityMS(Config* this)
    return this->tuneENOENTCacheValidityMS;
 }
 
+bool Config_getSysRemoteInvalEnabled(Config* this)
+{
+   return this->sysRemoteInvalEnabled;
+}
+
 bool Config_getTuneRemoteFSync(Config* this)
 {
    return this->tuneRemoteFSync;
@@ -702,11 +709,6 @@ InodeIDStyle Config_getSysInodeIDStyleNum(Config* this)
    return this->sysInodeIDStyleNum;
 }
 
-bool Config_getSysCacheInvalidationVersion(Config* this)
-{
-   return this->sysCacheInvalidationVersion;
-}
-
 bool Config_getSysCreateHardlinksAsSymlinks(Config* this)
 {
    return this->sysCreateHardlinksAsSymlinks;
@@ -760,6 +762,11 @@ SELinuxRevalidateMode Config_getsysSELinuxRevalidate(Config* this)
 bool Config_getsysSELinuxEnabled(Config* this)
 {
    return this->sysSELinuxEnabled;
+}
+
+bool Config_getSysNFSv4ACLsEnabled(Config* this)
+{
+   return this->sysNFSv4ACLsEnabled;
 }
 
 bool Config_getSysACLsEnabled(Config* this)

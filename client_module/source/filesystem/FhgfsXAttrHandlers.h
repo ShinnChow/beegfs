@@ -5,33 +5,13 @@
 
 int FhgfsXAttr_init_security(struct inode *inode, struct inode *dir, const struct qstr *qstr);
 
-#if defined(KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER)
-
-extern const struct xattr_handler* const fhgfs_xattr_handlers_selinux[];
+extern const struct xattr_handler fhgfs_xattr_user_handler;
 #ifdef KERNEL_HAS_GET_ACL
-extern const struct xattr_handler* const fhgfs_xattr_handlers_acl[];
-extern const struct xattr_handler* const fhgfs_xattr_handlers[];
+extern const struct xattr_handler fhgfs_xattr_acl_access_handler;
+extern const struct xattr_handler fhgfs_xattr_acl_default_handler;
 #endif
-extern const struct xattr_handler* const fhgfs_xattr_handlers_noacl[];
-
-#elif defined(KERNEL_HAS_CONST_XATTR_HANDLER)
-
-extern const struct xattr_handler* fhgfs_xattr_handlers_selinux[];
-#ifdef KERNEL_HAS_GET_ACL
-extern const struct xattr_handler* fhgfs_xattr_handlers_acl[];
-extern const struct xattr_handler* fhgfs_xattr_handlers[];
-#endif
-extern const struct xattr_handler* fhgfs_xattr_handlers_noacl[];
-
-#else
-
-extern struct xattr_handler* fhgfs_xattr_handlers_selinux[];
-#ifdef KERNEL_HAS_GET_ACL
-extern struct xattr_handler* fhgfs_xattr_handlers_acl[];
-extern struct xattr_handler* fhgfs_xattr_handlers[];
-#endif
-extern struct xattr_handler* fhgfs_xattr_handlers_noacl[];
-#endif
+extern const struct xattr_handler beegfsXAttrNfs4AclHandler;
+extern const struct xattr_handler fhgfs_xattr_security_handler;
 
 /**
  * The get-function which is used for all the security.* xattrs.

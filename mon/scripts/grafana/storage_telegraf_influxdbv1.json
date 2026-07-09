@@ -92,7 +92,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#4ac09b75",
+                "color": "transparent",
                 "value": null
               }
             ]
@@ -184,6 +184,130 @@
         "type": "influxdb",
         "uid": "${DS_BEEGFS_MON_INFLUXDB}"
       },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "transparent",
+            "mode": "fixed"
+          },
+          "mappings": [
+            {
+              "options": {
+                "false": {
+                  "color": "red",
+                  "index": 1,
+                  "text": "Not Responding"
+                },
+                "true": {
+                  "color": "#4ac09b75",
+                  "index": 0,
+                  "text": "Responding"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 4,
+        "y": 0
+      },
+      "id": 38,
+      "links": [],
+      "maxDataPoints": 100,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^last$/",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "9.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+          },
+          "dsType": "influxdb",
+          "groupBy": [
+            {
+              "params": [
+                "$interval"
+              ],
+              "type": "time"
+            },
+            {
+              "params": [
+                "null"
+              ],
+              "type": "fill"
+            }
+          ],
+          "measurement": "storage",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "query": "SELECT mean(\"n_users\") FROM \"system\" WHERE \"host\" =~ /^$metaID$/ AND $timeFilter GROUP BY time($interval) fill(null)",
+          "rawQuery": false,
+          "refId": "A",
+          "resultFormat": "table",
+          "select": [
+            [
+              {
+                "params": [
+                  "isResponding"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [],
+                "type": "last"
+              }
+            ]
+          ],
+          "tags": [
+            {
+              "key": "nodeNumID",
+              "operator": "=~",
+              "value": "/^$storageID$/"
+            }
+          ]
+        }
+      ],
+      "title": "Monitoring",
+      "transformations": [],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -210,7 +334,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 4,
+        "x": 7,
         "y": 0
       },
       "id": 6,
@@ -305,7 +429,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 6,
+        "x": 9,
         "y": 0
       },
       "id": 8,
@@ -388,332 +512,6 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "fixedColor": "#9340cc8f",
-            "mode": "fixed"
-          },
-          "mappings": [
-            {
-              "options": {
-                "false": {
-                  "color": "red",
-                  "index": 1,
-                  "text": "DOWN"
-                },
-                "true": {
-                  "color": "#4ac09b75",
-                  "index": 0,
-                  "text": "UP"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "semi-dark-purple",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 2,
-        "x": 8,
-        "y": 0
-      },
-      "id": 38,
-      "links": [],
-      "maxDataPoints": 100,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/^last$/",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "9.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-          },
-          "dsType": "influxdb",
-          "groupBy": [
-            {
-              "params": [
-                "$interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "measurement": "storage",
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "SELECT mean(\"n_users\") FROM \"system\" WHERE \"host\" =~ /^$metaID$/ AND $timeFilter GROUP BY time($interval) fill(null)",
-          "rawQuery": false,
-          "refId": "A",
-          "resultFormat": "table",
-          "select": [
-            [
-              {
-                "params": [
-                  "isResponding"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "last"
-              }
-            ]
-          ],
-          "tags": [
-            {
-              "key": "nodeNumID",
-              "operator": "=~",
-              "value": "/^$storageID$/"
-            }
-          ]
-        }
-      ],
-      "title": "Service Status",
-      "transformations": [],
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "#818421",
-            "mode": "fixed"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 2,
-        "x": 10,
-        "y": 0
-      },
-      "id": 40,
-      "links": [],
-      "maxDataPoints": 100,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/^mean$/",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "9.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-          },
-          "groupBy": [
-            {
-              "params": [
-                "$__interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "hide": false,
-          "measurement": "processes",
-          "orderByTime": "ASC",
-          "policy": "default",
-          "refId": "B",
-          "resultFormat": "table",
-          "select": [
-            [
-              {
-                "params": [
-                  "total_threads"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": [
-            {
-              "key": "host",
-              "operator": "=~",
-              "value": "/^$hoststorage$/"
-            }
-          ]
-        }
-      ],
-      "title": "Total Threads",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "#7c0773",
-            "mode": "fixed"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 2,
-        "x": 12,
-        "y": 0
-      },
-      "id": 10,
-      "links": [],
-      "maxDataPoints": 100,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "9.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-          },
-          "dsType": "influxdb",
-          "groupBy": [
-            {
-              "params": [
-                "$interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "policy": "default",
-          "query": "SELECT last(\"total\") FROM \"processes\" WHERE \"host\" =~ /^$hoststorage$/ AND $timeFilter GROUP BY time($interval) fill(null)",
-          "rawQuery": true,
-          "refId": "A",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        }
-      ],
-      "title": "Total Processes",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
             "mode": "thresholds"
           },
           "mappings": [],
@@ -743,7 +541,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 14,
+        "x": 11,
         "y": 0
       },
       "id": 42,
@@ -894,7 +692,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 16,
+        "x": 13,
         "y": 0
       },
       "id": 44,
@@ -1045,7 +843,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 18,
+        "x": 15,
         "y": 0
       },
       "id": 46,
@@ -1196,7 +994,7 @@
       "gridPos": {
         "h": 5,
         "w": 4,
-        "x": 20,
+        "x": 17,
         "y": 0
       },
       "id": 12,
@@ -1206,7 +1004,7 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "mean"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -4039,14 +3837,14 @@
           "type": "influxdb",
           "uid": "${DS_BEEGFS_MON_INFLUXDB}"
         },
-        "definition": "select last(\"hostnameid\") from storage  where nodeNumID =~ /^$storageID$/",
+        "definition": "select last(\"hostnameid\") from storage  where nodeNumID =~ /^$storageID$/ AND time > now() - 7d",
         "hide": 0,
         "includeAll": false,
         "label": "Storage Host",
         "multi": false,
         "name": "hoststorage",
         "options": [],
-        "query": "select last(\"hostnameid\") from storage  where nodeNumID =~ /^$storageID$/",
+        "query": "select last(\"hostnameid\") from storage  where nodeNumID =~ /^$storageID$/ AND time > now() - 7d",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,

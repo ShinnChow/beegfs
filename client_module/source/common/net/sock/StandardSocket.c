@@ -360,7 +360,7 @@ bool _StandardSocket_connectByIP(Socket* this, struct in6_addr ipaddress, unsign
       return false;
    }
 
-   connRes = kernel_connect(thisCast->sock, bsa_ptr(&bsa), bsa_size(&bsa), O_NONBLOCK);
+   connRes = beegfs_kernel_connect(thisCast->sock, bsa_ptr(&bsa), bsa_size(&bsa), O_NONBLOCK);
 
    if(connRes)
    {
@@ -429,7 +429,7 @@ bool _StandardSocket_bindToAddr(Socket* this, struct in6_addr ipaddress, unsigne
       return false;
    }
 
-   bindRes = kernel_bind(thisCast->sock, bsa_ptr(&bsa), bsa_size(&bsa));
+   bindRes = beegfs_kernel_bind(thisCast->sock, bsa_ptr(&bsa), bsa_size(&bsa));
 
    if(bindRes)
    {

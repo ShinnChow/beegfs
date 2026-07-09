@@ -6,6 +6,9 @@
 #include "FhgfsOps_versions.h"
 
 #include <linux/fs.h>
+#ifdef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+#include <linux/fs_context.h>
+#endif
 #include <linux/vfs.h>
 #include <linux/backing-dev.h>
 #include <linux/seq_file.h>
@@ -33,7 +36,9 @@ extern int FhgfsOps_showOptions(struct seq_file* sf, struct dentry* dentry);
 extern int FhgfsOps_showOptions(struct seq_file* sf, struct vfsmount* vfs);
 #endif
 
+#ifndef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
 extern int  FhgfsOps_fillSuper(struct super_block* sb, void* rawMountOptions, int silent);
+#endif
 
 // getters & setters
 static inline App* FhgfsOps_getApp(struct super_block* sb);

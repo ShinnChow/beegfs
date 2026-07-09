@@ -23,6 +23,7 @@
 #define BEEGFS_PROC_ENTRY_METATARGETSTATES    "meta_target_state"
 #define BEEGFS_PROC_ENTRY_STORAGETARGETSTATES "storage_target_state"
 #define BEEGFS_PROC_ENTRY_REMAPCONNFAILURE    "remap_connection_failure"
+#define BEEGFS_PROC_ENTRY_CACHESTATS          "inode_cache_stats"
 
 
 /**
@@ -85,6 +86,7 @@ static const struct fhgfs_proc_file fhgfs_proc_files[] =
    { BEEGFS_PROC_ENTRY_CLIENTINFO, &__ProcFs_readV2_clientInfo },
    { BEEGFS_PROC_ENTRY_METATARGETSTATES, &__ProcFs_readV2_metaTargetStates },
    { BEEGFS_PROC_ENTRY_STORAGETARGETSTATES, &__ProcFs_readV2_storageTargetStates },
+   { BEEGFS_PROC_ENTRY_CACHESTATS, &__ProcFs_readV2_cacheStats },
    { "", NULL } // last element must be empty (for loop termination)
 };
 
@@ -293,6 +295,10 @@ void ProcFs_removeEntries(App* app)
    remove_proc_entry(entryNameBuf, NULL);
 
    scnprintf(entryNameBuf, BEEGFS_PROC_NAMEBUF_LEN, "%s/%s",
+      dirNameBuf, BEEGFS_PROC_ENTRY_CACHESTATS);
+   remove_proc_entry(entryNameBuf, NULL);
+
+   scnprintf(entryNameBuf, BEEGFS_PROC_NAMEBUF_LEN, "%s/%s",
       dirNameBuf, BEEGFS_PROC_ENTRY_RETRIESENABLED);
    remove_proc_entry(entryNameBuf, NULL);
 
@@ -362,6 +368,13 @@ int __ProcFs_readV2_status(struct seq_file* file, void* v)
    App* app = file->private;
 
    return ProcFsHelper_readV2_status(file, app);
+}
+
+int __ProcFs_readV2_cacheStats(struct seq_file* file, void* v)
+{
+   App* app = file->private;
+
+   return ProcFsHelper_readV2_cacheStats(file, app);
 }
 
 int __ProcFs_readV2_mgmtNodes(struct seq_file* file, void* p)

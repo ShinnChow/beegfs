@@ -12,17 +12,10 @@ static FhgfsOpsErr checkChunkDirRemovable(const int dirFD)
    while (true)
    {
       struct dirent* result;
-
-#if USE_READDIR_R
-      struct dirent buffer;
-      if (readdir_r(dir, &buffer, &result) != 0)
-         break;
-#else
       errno = 0;
-      result = readdir(dir);
+      result = ::readdir(dir);
       if (!result && errno)
          break;
-#endif
 
       if (!result)
          return FhgfsOpsErr_SUCCESS;

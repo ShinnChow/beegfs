@@ -7,6 +7,7 @@
 #include <common/storage/EntryInfo.h>
 #include <common/storage/StatData.h>
 
+#define MKLOCALDIRMSG_COMPATFLAG_HAS_NFS4_ACL 0x01
 
 class MkLocalDirMsg : public MirroredMessageBase<MkLocalDirMsg>
 {
@@ -20,9 +21,10 @@ class MkLocalDirMsg : public MirroredMessageBase<MkLocalDirMsg>
        */
       MkLocalDirMsg(EntryInfo* entryInfo, unsigned userID, unsigned groupID, int mode,
          StripePattern* pattern, RemoteStorageTarget* rst, NumNodeID parentNodeID,
-         const CharVector& defaultACLXAttr, const CharVector& accessACLXAttr) :
+         const CharVector& defaultACLXAttr, const CharVector& accessACLXAttr,
+         const CharVector& nfs4ACLXAttr) :
             BaseType(NETMSGTYPE_MkLocalDir),
-            defaultACLXAttr(defaultACLXAttr), accessACLXAttr(accessACLXAttr)
+            defaultACLXAttr(defaultACLXAttr), accessACLXAttr(accessACLXAttr), nfs4ACLXAttr(nfs4ACLXAttr)
       {
          this->entryInfoPtr = entryInfo;
          this->userID = userID;
@@ -52,6 +54,9 @@ class MkLocalDirMsg : public MirroredMessageBase<MkLocalDirMsg>
             % obj->defaultACLXAttr
             % obj->accessACLXAttr;
 
+         if (obj->isMsgHeaderCompatFeatureFlagSet(MKLOCALDIRMSG_COMPATFLAG_HAS_NFS4_ACL))
+            ctx % obj->nfs4ACLXAttr;
+
          if (obj->hasFlag(NetMessageHeader::Flag_BuddyMirrorSecond))
             ctx % obj->dirTimestamps;
       }
@@ -79,6 +84,7 @@ class MkLocalDirMsg : public MirroredMessageBase<MkLocalDirMsg>
       // ACLs
       CharVector defaultACLXAttr;
       CharVector accessACLXAttr;
+      CharVector nfs4ACLXAttr;
 
    protected:
       MirroredTimestamps dirTimestamps;
@@ -133,6 +139,11 @@ class MkLocalDirMsg : public MirroredMessageBase<MkLocalDirMsg>
       const CharVector& getAccessACLXAttr() const
       {
          return this->accessACLXAttr;
+      }
+
+      const CharVector& getNfs4ACLXAttr() const
+      {
+         return this->nfs4ACLXAttr;
       }
 
       void setDirTimestamps(const MirroredTimestamps& ts) { dirTimestamps = ts; }

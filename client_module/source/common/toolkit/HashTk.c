@@ -298,6 +298,7 @@ int HashTk_sha256(const unsigned char* data, unsigned int dataLen, unsigned char
    struct crypto_shash *alg;
    struct shash_desc *sdesc;
    int res = 0;
+   unsigned int size;
 
    alg = crypto_alloc_shash(hashAlgName, 0, 0);
    if(IS_ERR(alg))
@@ -306,12 +307,13 @@ int HashTk_sha256(const unsigned char* data, unsigned int dataLen, unsigned char
        return -1;
    }
 
-   sdesc = kmalloc(crypto_shash_descsize(alg), GFP_KERNEL);
+   size = sizeof(*sdesc) + crypto_shash_descsize(alg);
+   sdesc = kmalloc(size, GFP_KERNEL);
    if (sdesc == NULL)
    {
        printk_fhgfs(KERN_ERR, "Allocating hash memory failed\n");
        crypto_free_shash(alg);
-       return -1;
+       return -ENOMEM;
    }
 
    sdesc->tfm = alg;

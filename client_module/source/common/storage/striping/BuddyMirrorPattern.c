@@ -18,10 +18,6 @@ bool BuddyMirrorPattern_deserializePattern(StripePattern* this, DeserializeCtx* 
    if(!Serialization_deserializeUInt16Vec(&mirrorBuddyGroupIDsVec, &thisCast->mirrorBuddyGroupIDs) )
       return false;
 
-   // check mirrorBuddyGroupIDs
-   if(!UInt16Vec_length(&thisCast->mirrorBuddyGroupIDs) )
-      return false;
-
    return true;
 }
 
@@ -36,9 +32,19 @@ uint16_t BuddyMirrorPattern_getStripeTargetID(StripePattern* this, int64_t pos)
 {
    BuddyMirrorPattern* thisCast = (BuddyMirrorPattern*)this;
 
-   size_t targetIndex = BuddyMirrorPattern_getStripeTargetIndex(this, pos);
+   /*
+    * Directory patterns carry no assigned targets (only defaultNumTargets).
+    * Calling getStripeTargetID() on a directory pattern is a programming error;
+    * return 0 (the BeeGFS "no target" sentinel, same as SimplePattern_getStripeTargetID).
+    */
+   BEEGFS_BUG_ON(!UInt16Vec_length(&thisCast->mirrorBuddyGroupIDs),
+      "Stripe pattern has no assigned target IDs; likely a directory pattern "
+      "(directories carry only defaultNumTargets, not actual target IDs)");
+   if (!UInt16Vec_length(&thisCast->mirrorBuddyGroupIDs))
+      return 0;
 
-   return UInt16Vec_at(&thisCast->mirrorBuddyGroupIDs, targetIndex);
+   return UInt16Vec_at(&thisCast->mirrorBuddyGroupIDs,
+      BuddyMirrorPattern_getStripeTargetIndex(this, pos));
 }
 
 void BuddyMirrorPattern_getStripeTargetIDsCopy(StripePattern* this, UInt16Vec* outTargetIDs)

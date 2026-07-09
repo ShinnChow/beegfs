@@ -1332,7 +1332,7 @@ static PMQ *initPmq()
 {
    auto config = Program::getApp()->getConfig();
 
-   std::string dirpath = config->getFileEventPersistDirectory();
+   std::string dirpath = config->getSysFileEventPersistDirectory();
 
    if (dirpath.empty())
    {
@@ -1350,7 +1350,7 @@ static PMQ *initPmq()
       dirpath += "eventq";
    }
 
-   int64_t persistSize = config->getFileEventPersistSize();
+   int64_t persistSize = config->getSysFileEventPersistSize();
    if (persistSize < 0)
    {
       LOG(EVENTLOGGER, ERR, std::string("sysFileEventPersistSize is negative."));

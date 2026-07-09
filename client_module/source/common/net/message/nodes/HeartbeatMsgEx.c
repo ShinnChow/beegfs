@@ -3,6 +3,7 @@
 #include <common/toolkit/SocketTk.h>
 #include <common/net/msghelpers/MsgHelperAck.h>
 #include <common/toolkit/ListTk.h>
+#include <components/InvalReader.h>
 #include <nodes/NodeStoreEx.h>
 #include <app/config/Config.h>
 #include "HeartbeatMsgEx.h"
@@ -174,16 +175,22 @@ bool __HeartbeatMsgEx_processIncoming(NetMessage* this, struct App* app,
 
    App_lockNicList(app);
    {
-      NicAddressList *localNicList = nodeType == NODETYPE_Meta || nodeType == NODETYPE_Storage? App_getLocalRDMANicListLocked(app) : NULL;
-      node = Node_construct(app,
-         HeartbeatMsgEx_getNodeID(thisCast), HeartbeatMsgEx_getNodeNumID(thisCast),
-         HeartbeatMsgEx_getPortUDP(thisCast), HeartbeatMsgEx_getPortTCP(thisCast), &nicList,
-         localNicList);
+      Node_InitParams params = {0};
+      params.app = app;
+      params.nodeID = HeartbeatMsgEx_getNodeID(thisCast);
+      params.nodeNumID = HeartbeatMsgEx_getNodeNumID(thisCast);
+      params.nodeType = nodeType;
+      params.portUDP = HeartbeatMsgEx_getPortUDP(thisCast);
+      params.portTCP = HeartbeatMsgEx_getPortTCP(thisCast);
+      params.nicList = &nicList;
+      params.localRdmaNicList = (nodeType == NODETYPE_Meta || nodeType == NODETYPE_Storage)
+         ? App_getLocalRDMANicListLocked(app) : NULL;
+
+      node = Node_construct(&params);
+
       // (will belong to the NodeStore => no destruct() required)
    }
    App_unlockNicList(app);
-
-   Node_setNodeAliasAndType(node, NULL, nodeType);
 
    // set local nic capabilities
 
@@ -207,6 +214,11 @@ bool __HeartbeatMsgEx_processIncoming(NetMessage* this, struct App* app,
          HeartbeatMsgEx_getNodeID(thisCast),
          HeartbeatMsgEx_getNodeNumID(thisCast).value,
          (supportsRDMA ? "RDMA; " : "") );
+
+      if (app->invalReader && nodeType==NODETYPE_Meta)
+      {
+         InvalReader_startMetaThread(app->invalReader, nodeNumID);
+      }
    }
 
    __HeartbeatMsgEx_processIncomingRoot(thisCast, app);

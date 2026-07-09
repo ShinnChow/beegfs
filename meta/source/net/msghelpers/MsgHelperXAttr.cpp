@@ -1,5 +1,6 @@
 #include <common/storage/EntryInfo.h>
 #include <program/Program.h>
+#include <components/InvalWatch.h>
 #include <storage/MetaStore.h>
 #include <toolkit/XAttrTk.h>
 #include "MsgHelperXAttr.h"
@@ -110,6 +111,10 @@ FhgfsOpsErr MsgHelperXAttr::removexattr(EntryInfo* entryInfo, const std::string&
 
       metaStore->releaseFile(entryInfo->getParentEntryID(), inode);
 
+      // Trigger remote cache invalidation
+      if (result == FhgfsOpsErr_SUCCESS)
+         invalidate_target_by_entryid(entryInfo->getEntryID());
+
       return result;
    }
 
@@ -131,6 +136,9 @@ FhgfsOpsErr MsgHelperXAttr::removexattr(EntryInfo* entryInfo, const std::string&
 
    metaStore->releaseDir(dir->getID());
 
+   if (result == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(entryInfo->getEntryID());
+
    return result;
 }
 
@@ -148,6 +156,10 @@ FhgfsOpsErr MsgHelperXAttr::setxattr(EntryInfo* entryInfo, const std::string& na
       auto result = inode->setXAttr(entryInfo, name, value, flags);
 
       metaStore->releaseFile(entryInfo->getParentEntryID(), inode);
+
+      // Trigger remote cache invalidation
+      if (result == FhgfsOpsErr_SUCCESS)
+         invalidate_target_by_entryid(entryInfo->getEntryID());
 
       return result;
    }
@@ -171,6 +183,9 @@ FhgfsOpsErr MsgHelperXAttr::setxattr(EntryInfo* entryInfo, const std::string& na
          flags);
 
    metaStore->releaseDir(dir->getID());
+
+   if (result == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(entryInfo->getEntryID());
 
    return result;
 }

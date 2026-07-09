@@ -119,6 +119,7 @@ make DESTDIR=${RPM_BUILD_ROOT} daemons-install utils-install
 ##########
 mkdir -p \
    ${RPM_BUILD_ROOT}/etc/beegfs \
+   ${RPM_BUILD_ROOT}/etc/beeond \
    ${RPM_BUILD_ROOT}/etc/init.d \
    ${RPM_BUILD_ROOT}/opt/beegfs/scripts/grafana
 
@@ -623,6 +624,7 @@ This package contains BeeOND.
 %files -n beeond
 %defattr(-,root,root)
 %license /usr/share/doc/beeond/copyright
+%dir /etc/beeond
 /opt/beegfs/sbin/beeond
 /usr/bin/beeond
 /opt/beegfs/sbin/beeond-cp

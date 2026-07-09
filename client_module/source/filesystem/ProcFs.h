@@ -27,6 +27,7 @@ extern int __ProcFs_readV2_storageNodes(struct seq_file* file, void* p);
 extern int __ProcFs_readV2_clientInfo(struct seq_file* file, void* p);
 extern int __ProcFs_readV2_metaTargetStates(struct seq_file* file, void* p);
 extern int __ProcFs_readV2_storageTargetStates(struct seq_file* file, void* p);
+extern int __ProcFs_readV2_cacheStats(struct seq_file* file, void* p);
 
 extern int __ProcFs_readV2_connRetriesEnabled(struct seq_file* file, void* p);
 extern int __ProcFs_readV2_netBenchModeEnabled(struct seq_file* file, void* p);

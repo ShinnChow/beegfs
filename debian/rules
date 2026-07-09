@@ -1,9 +1,9 @@
 #!/usr/bin/make -f
 
-# this is so awful
-PAREN = )
-BEEGFS_VERSION = $(shell head -n1 debian/changelog | grep -P --only-matching '(?<=\d:)[^$(PAREN)~]+')
-BEEGFS_MAJOR = $(shell head -n1 debian/changelog | grep -P --only-matching '(?<=\d:)\d+')
+# Debian version format: [epoch:]upstream_version[-debian_revision]
+DEB_VERSION = $(shell dpkg-parsechangelog -SVersion)
+BEEGFS_VERSION = $(shell printf '%s\n' '$(DEB_VERSION)' | sed -E 's/^[0-9]+://; s/-[^-]+$$//')
+BEEGFS_MAJOR = $(shell printf '%s\n' '$(BEEGFS_VERSION)' | cut -d. -f1)
 
 BEEGFS_NVFS=1
 DPKG_EXPORT_BUILDFLAGS = 1
@@ -46,7 +46,7 @@ override_dh_install:
 	install -D -m644 meta/build/dist/etc/default/beegfs-meta \
 		debian/beegfs-meta.default
 	install -D -m644 meta/build/dist/etc/beegfs-meta.conf \
-		debian/beegfs-meta/etc/beegfs/beegfs-meta.conf	
+		debian/beegfs-meta/etc/beegfs/beegfs-meta.conf
 	install -D -m644 mon/build/dist/etc/default/beegfs-mon \
 		debian/beegfs-mon.default
 	install -D -m644 mon/build/dist/etc/beegfs-mon.conf \
@@ -77,6 +77,7 @@ override_dh_install:
 	mkdir -p debian/beeond/opt/beegfs/lib
 	mkdir -p debian/beeond/opt/beegfs/sbin
 	mkdir -p debian/beeond/usr/bin
+	mkdir -p debian/beeond/etc/beeond
 	install -D beeond/source/beeond debian/beeond/opt/beegfs/sbin/beeond
 	install -D beeond/source/beeond-cp debian/beeond/opt/beegfs/sbin/beeond-cp
 	cp beeond/scripts/lib/* debian/beeond/opt/beegfs/lib/
@@ -137,15 +138,15 @@ override_dh_install:
 	cp -a client_devel/build/dist/usr/share/doc/beegfs-client-devel/examples/* \
 		debian/beegfs-client-dev/usr/share/doc/beegfs-client-dev/examples/
 
-# Before dbgsym packages, package maintainers had to manually create their -dbg packages listed 
-# in the debian/control file. --dbgsym-migration=package-relation This option is used to migrate 
+# Before dbgsym packages, package maintainers had to manually create their -dbg packages listed
+# in the debian/control file. --dbgsym-migration=package-relation This option is used to migrate
 # from a manual "-dbg" package (created with --dbg-package) to an automatic generated debug symbol package.
 override_dh_strip:
 	dh_strip -pbeegfs-meta       --dbgsym-migration='beegfs-meta-dbg (<< $(BEEGFS_VERSION)~)'
 	dh_strip -pbeegfs-mon        --dbgsym-migration='beegfs-mon-dbg (<< $(BEEGFS_VERSION)~)'
 	dh_strip -pbeegfs-storage    --dbgsym-migration='beegfs-storage-dbg (<< $(BEEGFS_VERSION)~)'
 	dh_strip -plibbeegfs-ib      --dbgsym-migration='libbeegfs-ib-dbg (<< $(BEEGFS_VERSION)~)'
-	
+
 # avoid auto-start because default config is not useful
 override_dh_installinit:
 	for component in storage meta mon; do \
@@ -163,13 +164,3 @@ override_dh_installinit:
 	dh_installinit -pbeegfs-meta          --no-stop-on-upgrade --no-start -- start 90 2 3 4 5 . stop 90 0 1 6 .
 	dh_installinit -pbeegfs-client        --no-stop-on-upgrade --no-start -- start 99 2 3 4 5 . stop 99 0 1 6 .
 	dh_installinit -pbeegfs-client-compat --no-stop-on-upgrade --no-start -- start 99 2 3 4 5 . stop 99 0 1 6 .
-
-# Debhelper 12.3 and dwz on Debian 10 error out with "dwz: Too few files for multifile optimization."
-# We need to skip dh_dwz only for the beegfs-utils package.
-# This can be removed once we stop supporting Debian 10 (Buster). The issue is fixed in Debian 11 (Bullseye).
-override_dh_dwz:
-	for pkg in $(dh_listpackages); do \
-		if [ "$$pkg" != "beegfs-utils" ]; then \
-			dh_dwz -p $$pkg; \
-		fi \
-	done

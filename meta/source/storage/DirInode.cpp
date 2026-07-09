@@ -3,6 +3,7 @@
 #include <common/storage/striping/Raid10Pattern.h>
 #include <common/toolkit/TimeAbs.h>
 #include <program/Program.h>
+#include <components/InvalWatch.h>
 #include <storage/PosixACL.h>
 #include <toolkit/XAttrTk.h>
 
@@ -15,6 +16,10 @@
 #include "DirInode.h"
 
 #include <boost/lexical_cast.hpp>
+
+#include <algorithm>
+#include <random>
+static thread_local std::mt19937 thread_local_rng(std::random_device{}());
 
 /**
  * Constructur used to create new directories.
@@ -141,7 +146,7 @@ StripePattern* DirInode::createFileStripePatternUnlocked(const UInt16List* prefe
          capacityPools->chooseStorageTargetsRoundRobin(desiredNumTargets, &stripeTargets);
 
          if(chooserType == TargetChooserType_RANDOMROBIN)
-            random_shuffle(stripeTargets.begin(), stripeTargets.end() ); // randomize result vector
+            std::shuffle(stripeTargets.begin(), stripeTargets.end(), thread_local_rng); // randomize result vector
       }
    }
    else
@@ -181,7 +186,7 @@ StripePattern* DirInode::createFileStripePatternUnlocked(const UInt16List* prefe
          capacityPools->chooseStorageTargetsRoundRobin(desiredNumTargets, &stripeTargets);
 
          if(chooserType == TargetChooserType_RANDOMROBIN)
-            random_shuffle(stripeTargets.begin(), stripeTargets.end() ); // randomize result vector
+            std::shuffle(stripeTargets.begin(), stripeTargets.end(), thread_local_rng); // randomize result vector
       }
    }
 
@@ -545,7 +550,8 @@ FhgfsOpsErr DirInode::makeDirEntryUnlocked(DirEntry* entry)
          resync->addModification(inodeFilename, MetaSyncFileType::Inode);
       }
    }
-
+   if (mkRes == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(this->id);
 out:
    return mkRes;
 }
@@ -570,7 +576,8 @@ FhgfsOpsErr DirInode::linkFilesInDirUnlocked(const std::string& fromName, FileIn
          resync->addModification(inodeFilename, MetaSyncFileType::Inode);
       }
    }
-
+   if (linkRes == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(this->id);
    return linkRes;
 }
 
@@ -614,6 +621,9 @@ FhgfsOpsErr DirInode::linkFileInodeToDirUnlocked(const std::string& inodePath,
       }
    }
 
+   if (retVal == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(this->id);
+
    return retVal;
 }
 
@@ -655,6 +665,8 @@ FhgfsOpsErr DirInode::removeDirUnlocked(const std::string& entryName, DirEntry**
          resync->addModification(inodeFilename, MetaSyncFileType::Inode);
       }
    }
+   if (rmRes == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(this->id);
 
    return rmRes;
 }
@@ -713,6 +725,8 @@ FhgfsOpsErr DirInode::renameDirEntryUnlocked(const std::string& fromName, const 
       }
    }
 
+   if (renameRes == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(this->id);
    return renameRes;
 }
 
@@ -803,6 +817,9 @@ FhgfsOpsErr DirInode::unlinkDirEntryUnlocked(const std::string& entryName, DirEn
          resync->addModification(inodeFilename, MetaSyncFileType::Inode);
       }
    }
+   // only invalidate on visible namespace change
+   if (unlinkRes == FhgfsOpsErr_SUCCESS && (unlinkTypeFlags & DirEntry_UNLINK_FILENAME))
+      invalidate_target_by_entryid(this->id);
 
 out:
    return unlinkRes;
@@ -1831,8 +1848,10 @@ FhgfsOpsErr DirInode::setDirParentAndChangeTime(EntryInfo* entryInfo, NumNodeID 
 
    FhgfsOpsErr retVal = setDirParentAndChangeTimeUnlocked(entryInfo, parentNodeID);
 
-   safeLock.unlock(); // U N L O C K
+   if (retVal == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(entryInfo->getEntryID());
 
+   safeLock.unlock(); // U N L O C K
    return retVal;
 }
 
@@ -2034,6 +2053,10 @@ bool DirInode::unlinkBusyFileUnlocked(const std::string& fileName, DirEntry* den
          resync->addModification(inodeFilename, MetaSyncFileType::Inode);
       }
    }
+
+   if (unlinkRes == FhgfsOpsErr_SUCCESS &&
+    (unlinkTypeFlags & DirEntry_UNLINK_FILENAME))
+      invalidate_target_by_entryid(this->id);
 
    return unlinkRes;
 }

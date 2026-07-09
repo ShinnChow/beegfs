@@ -36,9 +36,14 @@ class Cassandra : public TSDatabase
             std::shared_ptr<Node> node, const HighResolutionStats& data) override;
       virtual void insertStorageTargetsData(
             std::shared_ptr<Node> node, const StorageTargetInfo& data) override;
+      virtual void insertMetaTargetsData(
+            std::shared_ptr<Node> node, const StorageTargetInfo& data) override;
       virtual void insertClientNodeData(
             const std::string& id, const NodeType nodeType,
             const std::map<std::string, uint64_t>& opMap, bool perUser) override;
+      virtual void insertPerClientInvalWatchData(
+            std::shared_ptr<Node> node,
+            const InvalWatcherStat& entry) override;
       virtual void write() override;
 
    private:

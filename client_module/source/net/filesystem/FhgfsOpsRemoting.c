@@ -29,12 +29,17 @@
 #include <common/net/message/storage/attribs/SetXAttrRespMsg.h>
 #include <common/net/message/storage/attribs/SetFileStateMsg.h>
 #include <common/net/message/storage/attribs/SetFileStateRespMsg.h>
+#include <common/net/message/storage/attribs/GetEntryInfoMsg.h>
+#include <common/net/message/storage/attribs/GetEntryInfoRespMsg.h>
+#include <common/toolkit/GetEntryInfoResult.h>
 #include <common/net/message/storage/attribs/RefreshEntryInfoMsg.h>
 #include <common/net/message/storage/attribs/RefreshEntryInfoRespMsg.h>
 #include <common/net/message/storage/attribs/SetAttrMsg.h>
 #include <common/net/message/storage/attribs/SetAttrRespMsg.h>
 #include <common/net/message/storage/attribs/StatMsg.h>
 #include <common/net/message/storage/attribs/StatRespMsg.h>
+#include <common/net/message/storage/attribs/ReadInvalidationsMsg.h>
+#include <common/net/message/storage/attribs/ReadInvalidationsRespMsg.h>
 #include <common/net/message/storage/TruncFileMsg.h>
 #include <common/net/message/storage/TruncFileRespMsg.h>
 #include <common/net/message/session/BumpFileVersion.h>
@@ -937,11 +942,18 @@ FhgfsOpsErr FhgfsOpsRemoting_openfile(const EntryInfo* entryInfo, RemotingIOInfo
       if(!ioInfo->pattern)
       { // inode doesn't have pattern yet => create it from response
          StripePattern* pattern = OpenFileRespMsg_createPattern(openResp);
-         // check stripe pattern validity
-         if(unlikely(StripePattern_getPatternType(pattern) == STRIPEPATTERN_Invalid) )
-         { // invalid pattern
+         // check stripe pattern validity; evaluate targets once so the log message
+         // doesn't call getStripeTargetIDs again (returns NULL for SimplePattern/Invalid)
+         UInt16Vec* patternTargets = pattern->getStripeTargetIDs(pattern);
+         size_t numPatternTargets = patternTargets ? UInt16Vec_length(patternTargets) : 0;
+         if(unlikely(StripePattern_getPatternType(pattern) == STRIPEPATTERN_Invalid) ||
+            unlikely(numPatternTargets == 0) )
+         { // invalid pattern type, or valid-typed but empty target list (unexpected for a file)
             Logger_logErrFormatted(log, logContext,
-               "Received invalid stripe pattern from metadata node: %u%s; FileHandleID: %s",
+               "Received invalid stripe pattern from metadata node (type=%d targets=%zu): "
+               "%u%s; FileHandleID: %s",
+               StripePattern_getPatternType(pattern),
+               numPatternTargets,
                EntryInfo_getOwner(entryInfo), EntryInfo_getOwnerFlag(entryInfo),
                OpenFileRespMsg_getFileHandleID(openResp) );
 
@@ -2807,3 +2819,127 @@ FhgfsOpsErr FhgfsOpsRemoting_SetFileState(App* app, const EntryInfo* entryInfo,
 cleanup_request:
    return retVal;
 }
+
+/**
+ * Send GetEntryInfo RPC to the owning meta server and return the full response.
+ *
+ * The caller receives a GetEntryInfoResult with all data deep-copied from the
+ * response buffer (pattern, pathInfo, rst, sessions, fileState).
+ * Caller must call GetEntryInfoResult_uninit() to free all owned data on any
+ * return value, success or failure.
+ */
+FhgfsOpsErr FhgfsOpsRemoting_GetEntryInfo(App* app, const EntryInfo* entryInfo,
+   GetEntryInfoResult* outResult)
+{
+   struct GetEntryInfoMsg requestMsg;
+   RequestResponseNode rrNode = {
+      .peer = rrpeer_from_entryinfo(entryInfo),
+      .nodeStore = app->metaNodes,
+      .targetStates = app->metaStateStore,
+      .mirrorBuddies = app->metaBuddyGroupMapper
+   };
+   RequestResponseArgs rrArgs;
+   FhgfsOpsErr requestRes;
+   GetEntryInfoRespMsg* getResp;
+
+   GetEntryInfoMsg_initFromEntryInfo(&requestMsg, entryInfo);
+
+   RequestResponseArgs_prepare(&rrArgs, NULL, &requestMsg.netMessage,
+         NETMSGTYPE_GetEntryInfoResp);
+
+   requestRes = MessagingTk_requestResponseNodeRetryAutoIntr(app, &rrNode, &rrArgs);
+
+   if (requestRes != FhgfsOpsErr_SUCCESS)
+      return requestRes;
+
+   getResp = (GetEntryInfoRespMsg*)rrArgs.outRespMsg;
+
+   /* Deep-copy all response data into caller's result struct */
+   if (!GetEntryInfoResult_initFromRespMsg(outResult, getResp))
+   {
+      requestRes = FhgfsOpsErr_OUTOFMEM;
+      goto cleanup_request;
+   }
+
+   if (outResult->result != FhgfsOpsErr_SUCCESS)
+   {
+      requestRes = (FhgfsOpsErr)outResult->result;
+      goto cleanup_request;
+   }
+
+   RequestResponseArgs_freeRespBuffers(&rrArgs, app);
+   return FhgfsOpsErr_SUCCESS;
+
+cleanup_request:
+   RequestResponseArgs_freeRespBuffers(&rrArgs, app);
+   return requestRes;
+}
+
+FhgfsOpsErr FhgfsOpsRemoting_readInvalidations(App* app, NumNodeID metaID, uint32_t readPos,
+   bool resync, ReadInvalidationsData* outData)
+{
+   //TODO check if we can use MessagingTk_requestResponseSock
+   struct ReadInvalidationsMsg requestMsg;
+   RequestResponseNode rrNode = {
+      .peer = RRPeer_target(metaID),
+      .nodeStore = app->metaNodes,
+      .targetStates = app->metaStateStore,
+      .mirrorBuddies = app->metaBuddyGroupMapper
+   };
+   RequestResponseArgs rrArgs;
+   Logger* log = App_getLogger(app);
+   struct ReadInvalidationsRespMsg* getResp;
+   FhgfsOpsErr err = FhgfsOpsErr_SUCCESS;
+   enum { INODEINVAL_RECV_TIMEOUT_MS = 3000 };  //timeout for receiving response from meta
+
+   Logger_logFormatted(log, Log_DEBUG, __func__,
+        "readPos=%u resync=%d", readPos, (int) resync);
+
+   ReadInvalidationsMsg_initFromReadPos(&requestMsg, readPos, resync);
+
+   RequestResponseArgs_prepare(&rrArgs, NULL, &requestMsg.netMessage,
+         NETMSGTYPE_ReadInvalidationsResp);
+
+   rrArgs.recvTimeoutMS = INODEINVAL_RECV_TIMEOUT_MS;
+   rrArgs.numRetries = 1; // no retries, can lead to invalidReadPos error
+   rrArgs.respBufType = MessagingTkBufType_BufStore;
+
+   if (outData)
+   {
+      outData->errorFlags = 0;
+      outData->numUpdates = 0;
+      outData->outReadPos = readPos; // safe default on error
+   }
+
+   // communicate
+   // we keep retries bounded one retry, avoids stalling shutdown for extended periods
+   err = __MessagingTk_requestResponseNodeRetry(app, &rrNode, &rrArgs);
+
+   if (err != FhgfsOpsErr_SUCCESS)
+   {
+      return err;
+   }
+
+   getResp = (struct ReadInvalidationsRespMsg*) rrArgs.outRespMsg;
+
+   if (getResp->numUpdates > READINVALIDATIONS_MAX_IDS)
+   {
+      Logger_logFormatted(log, Log_WARNING, __func__,
+           "Received too many invalidations (%u > %u). Discarding response message.",
+           getResp->numUpdates, (uint32_t) READINVALIDATIONS_MAX_IDS);
+
+      err = FhgfsOpsErr_INTERNAL;
+   }
+   else
+   {
+      outData->errorFlags = getResp->errorFlags;
+      outData->numUpdates = getResp->numUpdates;
+      outData->outReadPos = getResp->readPos;
+      memcpy(outData->inodeIds, getResp->inodeIds, getResp->numUpdates * sizeof(*outData->inodeIds));
+   }
+
+   RequestResponseArgs_freeRespBuffers(&rrArgs, app);
+
+   return err;
+}
+

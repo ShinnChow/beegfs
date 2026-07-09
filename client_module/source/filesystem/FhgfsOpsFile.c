@@ -34,14 +34,26 @@
 static ssize_t FhgfsOps_buffered_write_iter(struct kiocb *iocb, struct iov_iter *from);
 static ssize_t FhgfsOps_buffered_read_iter(struct kiocb *iocb, struct iov_iter *to);
 
-static int FhgfsOps_write_begin(struct file* file, struct address_space* mapping,
+static int FhgfsOps_write_begin(
+#ifdef KERNEL_WRITE_BEGIN_HAS_KIOCB
+    const struct kiocb* iocb,
+#else
+    struct file* file,
+#endif
+    struct address_space* mapping,
     loff_t pos, unsigned len,
 #if BEEGFS_HAS_WRITE_FLAGS
     unsigned flags,
 #endif
     beegfs_pgfol_t *pgfolp, void** fsdata);
 
-static int FhgfsOps_write_end(struct file* file, struct address_space* mapping,
+static int FhgfsOps_write_end(
+#ifdef KERNEL_WRITE_END_HAS_KIOCB
+    const struct kiocb* iocb,
+#else
+    struct file* file,
+#endif
+    struct address_space* mapping,
     loff_t pos, unsigned len, unsigned copied, beegfs_pgfol_t pgfol, void* fsdata);
 
 #define MMAP_RETRY_LOCK_EASY 100
@@ -122,15 +134,7 @@ struct file_operations fhgfs_dir_ops =
 {
    .open             = FhgfsOps_opendirIncremental,
    .release          = FhgfsOps_releasedir,
-#ifdef KERNEL_HAS_ITERATE_DIR
-#if defined(KERNEL_HAS_FOPS_ITERATE)
-   .iterate       = FhgfsOps_iterateIncremental, // linux 3.11 renamed readdir to iterate
-#else
-   .iterate_shared   = FhgfsOps_iterateIncremental, // linux 6.3 removed .iterate & it's a parallel variant of .iterate().
-#endif
-#else
-   .readdir       = FhgfsOps_readdirIncremental, // linux 3.11 renamed readdir to iterate
-#endif // LINUX_VERSION_CODE
+   .iterate_shared   = FhgfsOps_iterateIncremental, // shared inode lock; allows concurrent getdents on same dir
    .read             = generic_read_dir, // just returns the appropriate error code
    .fsync            = FhgfsOps_fsync,
    .llseek           = FhgfsOps_llseekdir,
@@ -158,7 +162,12 @@ struct address_space_operations fhgfs_address_ops =
    .readpages      = FhgfsOpsPages_readpages,
    .set_page_dirty = __set_page_dirty_nobuffers,
 #endif
+#ifdef KERNEL_HAS_MIGRATE_FOLIO
+   .migrate_folio  = filemap_migrate_folio,
+#endif
+#ifndef KERNEL_WRITE_BEGIN_USES_FOLIO
    .writepage      = FhgfsOpsPages_writepage,
+#endif
    .writepages     = FhgfsOpsPages_writepages,
    .direct_IO      = FhgfsOps_directIO,
    .write_begin   = FhgfsOps_write_begin,
@@ -183,7 +192,12 @@ struct address_space_operations fhgfs_address_pagecache_ops =
    .readpages      = FhgfsOpsPages_readpages,
    .set_page_dirty = __set_page_dirty_nobuffers,
 #endif
+#ifdef KERNEL_HAS_MIGRATE_FOLIO
+   .migrate_folio  = filemap_migrate_folio,
+#endif
+#ifndef KERNEL_WRITE_BEGIN_USES_FOLIO
    .writepage      = FhgfsOpsPages_writepage,
+#endif
    .writepages     = FhgfsOpsPages_writepages,
    .direct_IO      = FhgfsOps_directIO,
    .write_begin   = FhgfsOps_write_begin,
@@ -351,18 +365,10 @@ int FhgfsOps_opendirIncremental(struct inode* inode, struct file* file)
       __FhgfsOps_setDirInfo(dirInfo, file);
    }
 
-#ifdef FMODE_KABI_ITERATE
-   file->f_mode |= FMODE_KABI_ITERATE;
-#endif
-
    return retVal;
 }
 
-#ifdef KERNEL_HAS_ITERATE_DIR
 int FhgfsOps_iterateIncremental(struct file* file, struct dir_context* ctx)
-#else
-int FhgfsOps_readdirIncremental(struct file* file, void* buf, filldir_t filldir)
-#endif // LINUX_VERSION_CODE
 {
    /* note: if the user seeks to a custom offset, llseekdir will invalidate any retrieved contents
       and set the new offset in the dirinfo object */
@@ -371,7 +377,7 @@ int FhgfsOps_readdirIncremental(struct file* file, void* buf, filldir_t filldir)
    struct super_block* superBlock = dentry->d_sb;
    App* app = FhgfsOps_getApp(superBlock);
    Logger* log = App_getLogger(app);
-   const char* logContext = "FhgfsOps_readdirIncremental";
+   const char* logContext = "FhgfsOps_iterateIncremental";
 
    int retVal = 0;
    FsDirInfo* dirInfo = __FhgfsOps_getDirInfo(file);
@@ -383,11 +389,7 @@ int FhgfsOps_readdirIncremental(struct file* file, void* buf, filldir_t filldir)
    StrCpyVec* dirContentIDs = FsDirInfo_getEntryIDs(dirInfo);
    Int64CpyVec* serverOffsets = FsDirInfo_getServerOffsets(dirInfo);
 
-   #ifdef KERNEL_HAS_ITERATE_DIR
-      loff_t* pos = &(ctx->pos); // used by dir_emit()
-   #else
-      loff_t* pos = &(file->f_pos);
-   #endif // LINUX_VERSION_CODE
+   loff_t* pos = &(ctx->pos); // used by dir_emit()
 
 
    if(unlikely(Logger_getLogLevel(log) >= Log_SPAM) )
@@ -462,15 +464,9 @@ int FhgfsOps_readdirIncremental(struct file* file, void* buf, filldir_t filldir)
          currentIno = currentIno >> 32; // (32-bit apps would fail with EOVERFLOW)
 
 
-      #ifdef KERNEL_HAS_ITERATE_DIR
-         if(!dir_emit(
-            ctx, currentName, strlen(currentName), currentIno, currentOSEntryType) )
-            break;
-      #else
-         if(filldir(
-            buf, currentName, strlen(currentName), *pos, currentIno, currentOSEntryType) < 0)
-            break;
-      #endif // LINUX_VERSION_CODE
+      if(!dir_emit(
+         ctx, currentName, strlen(currentName), currentIno, currentOSEntryType) )
+         break;
 
 
       LOG_DEBUG_FORMATTED(log, Log_SPAM, logContext, "filled: %s", currentName);
@@ -1526,13 +1522,22 @@ exit:
  * prepare_write() doesn't have this)
  * @return 0 on success
  */
-static int FhgfsOps_write_begin(struct file* file, struct address_space* mapping,
+static int FhgfsOps_write_begin(
+#ifdef KERNEL_WRITE_BEGIN_HAS_KIOCB
+    const struct kiocb* iocb,
+#else
+    struct file* file,
+#endif
+    struct address_space* mapping,
     loff_t pos, unsigned len,
 #if BEEGFS_HAS_WRITE_FLAGS
     unsigned flags,
 #endif
     beegfs_pgfol_t *pgfolp, void** fsdata)
 {
+#ifdef KERNEL_WRITE_BEGIN_HAS_KIOCB
+   struct file* file = iocb->ki_filp;
+#endif
    pgoff_t index = pos >> PAGE_SHIFT;
    loff_t offset = pos & (PAGE_SIZE - 1);
    loff_t page_start = pos & PAGE_MASK;
@@ -1605,9 +1610,18 @@ clean_up:
  * @param fsdata whatever write_begin() set here
  * @return < 0 on failure, number of bytes copied into pagecache (<= 'copied') otherwise
  **/
-static int FhgfsOps_write_end(struct file* file, struct address_space* mapping,
+static int FhgfsOps_write_end(
+#ifdef KERNEL_WRITE_END_HAS_KIOCB
+      const struct kiocb* iocb,
+#else
+      struct file* file,
+#endif
+      struct address_space* mapping,
       loff_t pos, unsigned len, unsigned copied, beegfs_pgfol_t pgfol, void* fsdata)
 {
+#ifdef KERNEL_WRITE_END_HAS_KIOCB
+   struct file* file = iocb->ki_filp;
+#endif
    struct page* page = beegfs_get_page(pgfol);
    FsFileInfo* fileInfo = __FhgfsOps_getFileInfo(file);
 

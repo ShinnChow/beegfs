@@ -67,28 +67,6 @@ static inline void fhgfs_set_wb_error(struct page *page, int err)
 }
 
 /**
- * generic_permission() compatibility function
- *
- * NOTE: Only kernels > 2.6.32 do have inode->i_op->check_acl, but as we do not
- *       support it anyway for now, we do not need a complete kernel version check for it.
- *       Also, in order to skip useless pointer references we just pass NULL here.
- */
-static inline int os_generic_permission(struct inode *inode, int mask)
-{
-   #ifdef KERNEL_HAS_GENERIC_PERMISSION_2
-      return generic_permission(inode, mask);
-   #elif defined(KERNEL_HAS_GENERIC_PERMISSION_4)
-      return generic_permission(inode, mask, 0, NULL);
-   #elif defined(KERNEL_HAS_IDMAPPED_MOUNTS)
-      return generic_permission(&nop_mnt_idmap, inode, mask);
-   #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
-      return generic_permission(&init_user_ns, inode, mask);
-   #else
-      return generic_permission(inode, mask, NULL);
-   #endif
-}
-
-/**
  * os_inode_permission - idmap-aware VFS permission check
  * @file:  Optional file to derive mount idmap/userns (may be NULL)
  * @inode: Inode to check permission on
@@ -208,12 +186,21 @@ static inline struct posix_acl* os_posix_acl_from_xattr(
     return posix_acl_from_xattr(userns, value, size);
 }
 
+#if defined(KERNEL_HAS_POSIX_ACL_TO_XATTR_ALLOC)
+static inline void *os_posix_acl_to_xattr(
+        struct user_namespace *userns,
+        const struct posix_acl* acl, size_t *sizep, gfp_t gfp)
+{
+    return posix_acl_to_xattr(userns, acl, sizep, gfp);
+}
+#else
 static inline int os_posix_acl_to_xattr(
         struct user_namespace *userns,
         const struct posix_acl* acl, void* buffer, size_t size)
 {
     return posix_acl_to_xattr(userns, acl, buffer, size);
 }
+#endif
 
 #ifndef KERNEL_HAS_PAGE_ENDIO
 static inline void page_endio(struct page *page, int rw, int err)

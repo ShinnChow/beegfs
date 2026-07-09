@@ -85,7 +85,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "fixedColor": "#4ac09b75",
+            "fixedColor": "transparent",
             "mode": "fixed"
           },
           "mappings": [],
@@ -191,6 +191,116 @@
       "fieldConfig": {
         "defaults": {
           "color": {
+            "fixedColor": "#9340cc8f",
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "false": {
+                  "color": "red",
+                  "index": 1,
+                  "text": "Not Responding"
+                },
+                "true": {
+                  "color": "#4ac09b75",
+                  "index": 0,
+                  "text": "Responding"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 4,
+        "y": 0
+      },
+      "id": 8,
+      "links": [],
+      "maxDataPoints": 100,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^Value$/",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "9.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+          },
+          "dsType": "influxdb",
+          "groupBy": [],
+          "measurement": "meta",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "query": "from(bucket: \"${bucket}\")  |> range(start: v.timeRangeStart, stop:v.timeRangeStop)  |> filter(fn: (r) =>    r.nodeNumID == \"${storageID}\" and     r._measurement == \"storage\" and    r._field == \"isResponding\")  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)  |> yield(name: \"last\")  |> keep(columns: [\"_time\",\"_value\"])",
+          "rawQuery": false,
+          "refId": "A",
+          "resultFormat": "time_series",
+          "select": [
+            [
+              {
+                "params": [
+                  "isResponding"
+                ],
+                "type": "field"
+              },
+              {
+                "params": [],
+                "type": "last"
+              }
+            ]
+          ],
+          "tags": [
+            {
+              "key": "nodeID",
+              "operator": "=~",
+              "value": "/^$metaID$/"
+            }
+          ]
+        }
+      ],
+      "title": "Monitoring",
+      "transformations": [],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
             "fixedColor": "#97b8e2",
             "mode": "fixed"
           },
@@ -214,7 +324,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 4,
+        "x": 7,
         "y": 0
       },
       "id": 4,
@@ -313,7 +423,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 6,
+        "x": 9,
         "y": 0
       },
       "id": 6,
@@ -388,313 +498,6 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "fixedColor": "#9340cc8f",
-            "mode": "fixed"
-          },
-          "mappings": [
-            {
-              "options": {
-                "false": {
-                  "color": "red",
-                  "index": 1,
-                  "text": "DOWN"
-                },
-                "true": {
-                  "color": "#4ac09b75",
-                  "index": 0,
-                  "text": "UP"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "semi-dark-purple",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 2,
-        "x": 8,
-        "y": 0
-      },
-      "id": 8,
-      "links": [],
-      "maxDataPoints": 100,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/^Value$/",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "9.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-          },
-          "dsType": "influxdb",
-          "groupBy": [],
-          "measurement": "meta",
-          "orderByTime": "ASC",
-          "policy": "default",
-          "query": "from(bucket: \"${bucket}\")  |> range(start: v.timeRangeStart, stop:v.timeRangeStop)  |> filter(fn: (r) =>    r.nodeNumID == \"${storageID}\" and     r._measurement == \"storage\" and    r._field == \"isResponding\")  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)  |> yield(name: \"last\")  |> keep(columns: [\"_time\",\"_value\"])",
-          "rawQuery": false,
-          "refId": "A",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "isResponding"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "last"
-              }
-            ]
-          ],
-          "tags": [
-            {
-              "key": "nodeID",
-              "operator": "=~",
-              "value": "/^$metaID$/"
-            }
-          ]
-        }
-      ],
-      "title": "Service Status",
-      "transformations": [],
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "#818421",
-            "mode": "fixed"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 2,
-        "x": 10,
-        "y": 0
-      },
-      "id": 10,
-      "links": [],
-      "maxDataPoints": 100,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "last"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "9.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-          },
-          "dsType": "influxdb",
-          "groupBy": [
-            {
-              "params": [
-                "$interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "policy": "default",
-          "query": "from(bucket: \"${bucket}\")  \r\n|> range(start: v.timeRangeStart, stop: v.timeRangeStop)  \r\n|> filter(fn: (r) => r[\"_measurement\"] == \"processes\")  \r\n|> filter(fn: (r) => r[\"_field\"] == \"total_threads\")  \r\n|> filter(fn: (r) =>  r.host == \"${hoststorage}\")  \r\n|> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)  \r\n|> yield(name: \"last\")",
-          "rawQuery": true,
-          "refId": "A",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        }
-      ],
-      "title": "Total Threads",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "#7c0773",
-            "mode": "fixed"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 2,
-        "x": 12,
-        "y": 0
-      },
-      "id": 12,
-      "links": [],
-      "maxDataPoints": 100,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "9.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "influxdb",
-            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-          },
-          "dsType": "influxdb",
-          "groupBy": [
-            {
-              "params": [
-                "$interval"
-              ],
-              "type": "time"
-            },
-            {
-              "params": [
-                "null"
-              ],
-              "type": "fill"
-            }
-          ],
-          "policy": "default",
-          "query": "from(bucket: \"${bucket}\")\r\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\r\n  |> filter(fn: (r) => r[\"_measurement\"] == \"processes\")\r\n  |> filter(fn: (r) => r[\"_field\"] == \"total\")\r\n  |> filter(fn: (r) => r[\"host\"] == \"${hoststorage}\")\r\n  |> last()\r\n  |> drop(columns: [\"_measurement\", \"_field\", \"_start\", \"_stop\", \"time\", \"host\"])",
-          "rawQuery": true,
-          "refId": "A",
-          "resultFormat": "time_series",
-          "select": [
-            [
-              {
-                "params": [
-                  "value"
-                ],
-                "type": "field"
-              },
-              {
-                "params": [],
-                "type": "mean"
-              }
-            ]
-          ],
-          "tags": []
-        }
-      ],
-      "title": "Total Processes",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
             "mode": "thresholds"
           },
           "mappings": [],
@@ -724,7 +527,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 14,
+        "x": 11,
         "y": 0
       },
       "id": 14,
@@ -732,7 +535,7 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "last"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -791,7 +594,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 16,
+        "x": 13,
         "y": 0
       },
       "id": 16,
@@ -858,7 +661,7 @@
       "gridPos": {
         "h": 5,
         "w": 2,
-        "x": 18,
+        "x": 15,
         "y": 0
       },
       "id": 18,
@@ -866,7 +669,7 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "last"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -922,7 +725,7 @@
       "gridPos": {
         "h": 5,
         "w": 4,
-        "x": 20,
+        "x": 17,
         "y": 0
       },
       "id": 20,
@@ -3148,14 +2951,14 @@
           "type": "influxdb",
           "uid": "${DS_BEEGFS_MON_INFLUXDB}"
         },
-        "definition": "from(bucket: \"${bucket}\")  |> range(start: v.timeRangeStart, stop:v.timeRangeStop)  |> filter(fn: (r) =>    r.nodeNumID == \"${storageID}\" and     r._measurement == \"storage\" and    r._field == \"hostnameid\")  |> last() ",
+        "definition": "from(bucket: \"${bucket}\")  |> range(start: -7d)  |> filter(fn: (r) =>    r.nodeNumID == \"${storageID}\" and     r._measurement == \"storage\" and    r._field == \"hostnameid\")  |> last()",
         "hide": 0,
         "includeAll": false,
         "label": "Storage Host",
         "multi": false,
         "name": "hoststorage",
         "options": [],
-        "query": "from(bucket: \"${bucket}\")  |> range(start: v.timeRangeStart, stop:v.timeRangeStop)  |> filter(fn: (r) =>    r.nodeNumID == \"${storageID}\" and     r._measurement == \"storage\" and    r._field == \"hostnameid\")  |> last() ",
+        "query": "from(bucket: \"${bucket}\")  |> range(start: -7d)  |> filter(fn: (r) =>    r.nodeNumID == \"${storageID}\" and     r._measurement == \"storage\" and    r._field == \"hostnameid\")  |> last()",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,

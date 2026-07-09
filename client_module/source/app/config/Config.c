@@ -271,6 +271,7 @@ void _Config_loadDefaults(Config* this)
    _Config_configMapRedefine(this, "tuneDirSubentryCacheValidityMS",   "1000");
    _Config_configMapRedefine(this, "tuneFileSubentryCacheValidityMS",  "0");
    _Config_configMapRedefine(this, "tuneENOENTCacheValidityMS",        "0");
+   _Config_configMapRedefine(this, "sysRemoteInvalEnabled", "false");
    _Config_configMapRedefine(this, "tunePathBufSize",                  "4096");
    _Config_configMapRedefine(this, "tunePathBufNum",                   "8");
    _Config_configMapRedefine(this, "tuneMsgBufSize",                   "1048576"); // 1MB
@@ -287,7 +288,6 @@ void _Config_loadDefaults(Config* this)
 
    _Config_configMapRedefine(this, "sysMgmtdHost",                     "");
    _Config_configMapRedefine(this, "sysInodeIDStyle",                  INODEIDSTYLE_DEFAULT);
-   _Config_configMapRedefine(this, "sysCacheInvalidationVersion",      "true");
    _Config_configMapRedefine(this, "sysCreateHardlinksAsSymlinks",     "false");
    _Config_configMapRedefine(this, "sysMountSanityCheckMS",            "11000");
    _Config_configMapRedefine(this, "sysSyncOnClose",                   "false");
@@ -304,6 +304,7 @@ void _Config_loadDefaults(Config* this)
    _Config_configMapRedefine(this, "sysXAttrsCheckCapabilities",       CHECKCAPABILITIES_NEVER_STR);
    _Config_configMapRedefine(this, "sysSELinuxEnabled",                "false");
    _Config_configMapRedefine(this, "sysSELinuxRevalidate",             "cache");
+   _Config_configMapRedefine(this, "sysNFSv4ACLsEnabled",               "false");
    _Config_configMapRedefine(this, "sysACLsEnabled",                   "false");
    _Config_configMapRedefine(this, "sysACLsRevalidate",                ACLSREVALIDATE_CACHE_STR);
    _Config_configMapRedefine(this, "sysBypassFileAccessCheckOnMeta",   "false");
@@ -633,6 +634,9 @@ bool _Config_applyConfigMap(Config* this)
       if(!strcmp(keyStr, "tuneENOENTCacheValidityMS") )
          this->tuneENOENTCacheValidityMS = StringTk_strToUInt(valueStr);
       else
+      if(!strcmp(keyStr, "sysRemoteInvalEnabled") )
+         this->sysRemoteInvalEnabled =  StringTk_strToBool(valueStr);
+      else
       IGNORE_CONFIG_VALUE("tuneMaxWriteWorks")
       IGNORE_CONFIG_VALUE("tuneMaxReadWorks")
       IGNORE_CONFIG_VALUE("tuneAllowMultiSetWrite")
@@ -685,9 +689,6 @@ bool _Config_applyConfigMap(Config* this)
          SAFE_KFREE(this->sysInodeIDStyle);
          this->sysInodeIDStyle = StringTk_strDup(valueStr);
       }
-      else
-      if(!strcmp(keyStr, "sysCacheInvalidationVersion") )
-         this->sysCacheInvalidationVersion = StringTk_strToBool(valueStr);
       else
       if(!strcmp(keyStr, "sysCreateHardlinksAsSymlinks") )
          this->sysCreateHardlinksAsSymlinks = StringTk_strToBool(valueStr);
@@ -744,6 +745,9 @@ bool _Config_applyConfigMap(Config* this)
       else
       if(!strcmp(keyStr, "sysBypassFileAccessCheckOnMeta"))
          this->sysBypassFileAccessCheckOnMeta = StringTk_strToBool(valueStr);
+      else
+      if(!strcmp(keyStr, "sysNFSv4ACLsEnabled") )
+         this->sysNFSv4ACLsEnabled = StringTk_strToBool(valueStr);
       else
       if(!strcmp(keyStr, "sysACLsEnabled") )
          this->sysACLsEnabled = StringTk_strToBool(valueStr);
@@ -819,6 +823,8 @@ bool _Config_applyConfigMap(Config* this)
          printk_fhgfs(KERN_INFO, "Ignoring obsolete config argument 'logHelperdIP'\n");
       else if(!strcmp(keyStr, "connHelperdPortTCP"))
          printk_fhgfs(KERN_INFO, "Ignoring obsolete config argument 'connHelperdPortTCP'\n");
+      else if(!strcmp(keyStr, "sysCacheInvalidationVersion"))
+         printk_fhgfs(KERN_INFO,"Ignoring obsolete config argument 'sysCacheInvalidationVersion'\n");
       else
       {
          StrCpyMapIter_next(&iter);
@@ -1314,8 +1320,8 @@ bool __Config_initImplicitVals(Config* this)
       this->connUDPRcvBufSize = this->connRDMABufNum * this->connRDMABufSize;
    }
 
-   // Automatically enable XAttrs if ACLs or SELinux have been enabled
-   if ((this->sysACLsEnabled || this->sysSELinuxEnabled) && !this->sysXAttrsEnabled)
+   // Automatically enable XAttrs if NFSv4 ACLs, POSIX ACLs, or SELinux are enabled
+   if ((this->sysNFSv4ACLsEnabled || this->sysACLsEnabled || this->sysSELinuxEnabled) && !this->sysXAttrsEnabled)
    {
       this->sysXAttrsEnabled = true;
       this->sysXAttrsImplicitlyEnabled = true;

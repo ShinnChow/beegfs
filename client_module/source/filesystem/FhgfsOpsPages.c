@@ -77,12 +77,13 @@ int _FhgfsOpsPages_readahead(struct readahead_control *ractl, struct page* page)
 int _FhgfsOpsPages_readpages(struct file* file, struct address_space* mapping,
    struct list_head* pageList, struct page* page);
 #endif
+static int FhgfsOpsPages_writePageCallBackPage(struct page *page, struct writeback_control *wbc,
+   void *dataPtr);
 #ifdef KERNEL_WRITEPAGE_HAS_FOLIO
 static int FhgfsOpsPages_writePageCallBack(struct folio *folio, struct writeback_control *wbc,
-   void *data);
+   void *dataPtr);
 #else
-static int FhgfsOpsPages_writePageCallBack(struct page *page, struct writeback_control *wbc,
-   void *data);
+#define FhgfsOpsPages_writePageCallBack FhgfsOpsPages_writePageCallBackPage
 #endif
 static int FhgfsOpsPages_readPageCallBack(void *dataPtr, struct page *page);
 
@@ -368,11 +369,27 @@ FhgfsOpsErr _FhgfsOpsPages_referenceFileHandle(FhgfsPageData* writePageData, uns
 #ifdef KERNEL_WRITEPAGE_HAS_FOLIO
 int FhgfsOpsPages_writePageCallBack(struct folio *folio, struct writeback_control *wbc, void *dataPtr)
 {
-    struct page *page = &folio->page;
-#else
-int FhgfsOpsPages_writePageCallBack(struct page *page, struct writeback_control *wbc, void *dataPtr)
-{
+   unsigned long nr_pages = folio_nr_pages(folio);
+
+   /*
+    * The writeback path is still page-based. Order-0 folios map cleanly to the
+    * existing page callback through the folio head page. Large folios are not
+    * enabled for this mapping today; enabling them with mapping_set_large_folios()
+    * in the inode setup is future work. If larger folios ever reach this callback,
+    * it must split the folio into per-page ranges before queuing writeback, and
+    * completion must use the matching folio-aware dirty/writeback/unlock helpers.
+    */
+
+   WARN_ONCE(nr_pages > 1, "beegfs: multi-page folio in %s index=%lu nr_pages=%lu\n",
+      __func__, folio->index, nr_pages);
+
+   return FhgfsOpsPages_writePageCallBackPage(&folio->page, wbc, dataPtr);
+}
 #endif
+
+static int FhgfsOpsPages_writePageCallBackPage(struct page *page, struct writeback_control *wbc,
+   void *dataPtr)
+{
    const char* logContext = __func__;
    int retVal = 0;
 
@@ -411,7 +428,7 @@ int FhgfsOpsPages_writePageCallBack(struct page *page, struct writeback_control 
       }
    }
 
-   if (page->index < endIndex)
+   if (page_index(page) < endIndex)
       /* in this case, the page is within the limits of the file */
       usedPageLen = PAGE_SIZE;
    else
@@ -420,7 +437,7 @@ int FhgfsOpsPages_writePageCallBack(struct page *page, struct writeback_control 
 
       usedPageLen = fileSize & ~PAGE_MASK;
 
-      if (page->index > endIndex || !usedPageLen)
+      if (page_index(page) > endIndex || !usedPageLen)
       {  // Page is outside the file size limit, probably truncate in progess, ignore this page
          int writeRes;
 
@@ -429,7 +446,7 @@ int FhgfsOpsPages_writePageCallBack(struct page *page, struct writeback_control 
             Logger_logFormattedWithEntryID(inode, Log_NOTICE, logContext,
                "Page outside file size limit. file-size: %llu page-offset: %llu, usedPageLen: %d "
                "pg-Idx: %lu endIdx: %lu",
-               fileSize, page_offset(page), usedPageLen, page->index, endIndex);
+               fileSize, page_offset(page), usedPageLen, page_index(page), endIndex);
          }
          #endif
 
@@ -569,16 +586,16 @@ int _FhgfsOpsPages_writepages(struct address_space* mapping, struct writeback_co
 
    if (!page)
    {  // writepages
-      retVal = write_cache_pages(mapping, wbc, FhgfsOpsPages_writePageCallBack, &pageData);
+      #if defined(KERNEL_WRITEPAGE_HAS_FOLIO) && defined(KERNEL_HAS_WRITEBACK_ITER)
+      retVal = beegfs_write_cache_folio(mapping, wbc, FhgfsOpsPages_writePageCallBack,
+         &pageData);
+      #else
+      retVal = beegfs_write_cache_pages(mapping, wbc, FhgfsOpsPages_writePageCallBack, &pageData);
+      #endif
    }
    else
    {  // Called with a single page only, so we are called from ->writepage
-#ifdef KERNEL_WRITEPAGE_HAS_FOLIO
-      struct folio *folio = page_folio(page);
-      retVal = FhgfsOpsPages_writePageCallBack(folio, wbc, &pageData);
-#else
-      retVal = FhgfsOpsPages_writePageCallBack(page, wbc, &pageData);
-#endif
+      retVal = FhgfsOpsPages_writePageCallBackPage(page, wbc, &pageData);
       if (unlikely(retVal < 0) )
       {  // some kind of error
          if (unlikely(pageData.chunkPageVec) )
@@ -772,7 +789,7 @@ void FhgfsOpsPages_endReadPage(Logger* log, struct inode* inode, struct FhgfsPag
    /* LogTopic_COMMKIT here, as the message belongs better to CommKitVec, although it is a page
     * relate method */
    Logger_logTopFormatted(log, LogTopic_COMMKIT, Log_SPAM, logContext,
-      "Page-index: %lu readRes: %d", page->index, readRes);
+      "Page-index: %lu readRes: %d", page_index(page), readRes);
 
    FhgfsOpsPages_incInodeFileSizeOnPagedRead(inode, offset, readRes);
 
@@ -968,7 +985,7 @@ int FhgfsOpsPages_readpage(struct file* file, struct page* page)
    struct page* page = &folio->page;
    DEFINE_READAHEAD(ractl, file, &file->f_ra, file->f_mapping, folio->index);
 #elif defined(KERNEL_HAS_FOLIO)
-   DEFINE_READAHEAD(ractl, file, &file->f_ra, file->f_mapping, page->index);
+   DEFINE_READAHEAD(ractl, file, &file->f_ra, file->f_mapping, page_index(page));
 #endif
 
    int writeBackRes;
@@ -980,7 +997,7 @@ int FhgfsOpsPages_readpage(struct file* file, struct page* page)
          "folio-index: %lu", folio->index);
 #else
    FhgfsOpsHelper_logOpDebug(app, file_dentry(file), inode, __func__,
-         "page-index: %lu", page->index);
+         "page-index: %lu", page_index(page));
 #endif
 
    IGNORE_UNUSED_VARIABLE(app);
@@ -999,13 +1016,13 @@ int FhgfsOpsPages_readpage(struct file* file, struct page* page)
          folio->index, retVal);
    #else
    FhgfsOpsHelper_logOpDebug(app, file_dentry(file), inode, __func__, "page-index: %lu retVal: %d",
-      page->index, retVal);
+      page_index(page), retVal);
    #endif
 #else
    retVal = _FhgfsOpsPages_readpages(file, file->f_mapping, NULL, page);
 
    FhgfsOpsHelper_logOpDebug(app, file_dentry(file), inode, __func__, "page-index: %lu retVal: %d",
-      page->index, retVal);
+      page_index(page), retVal);
 #endif
 
    return retVal;
@@ -1021,7 +1038,7 @@ outErr:
    unlock_page(page);
 
    FhgfsOpsHelper_logOpDebug(app, file_dentry(file), inode, __func__, "page-index: %lu retVal: %d",
-      page->index, retVal);
+      page_index(page), retVal);
 #endif
 
    return retVal;
@@ -1066,13 +1083,39 @@ int _FhgfsOpsPages_readpages(struct file* file, struct address_space* mapping,
 #ifdef KERNEL_HAS_FOLIO
    if (readahead_count(ractl))
    {
+#ifdef KERNEL_HAS_READAHEAD_PAGE
+      /* readahead_page() returns a page reference that must be released here. */
       while ((page = readahead_page(ractl)) != NULL)
       {
          retVal = FhgfsOpsPages_readPageCallBack(&pageData, page);
          put_page(page);
+
          if (retVal)
             break;
       }
+#else
+      struct folio *folio = NULL;
+      /*
+       * readahead_folio() drops the folio reference before returning it.
+       * The read path still owns completion/unlock, but not an extra ref.
+       */
+      while ((folio = readahead_folio(ractl)) != NULL)
+      {
+         unsigned int nr_pages = 0;
+         unsigned int page_idx = 0;
+
+         nr_pages = folio_nr_pages(folio);
+         for (page_idx = 0; page_idx < nr_pages; page_idx++)
+         {
+            page = folio_page(folio, page_idx);
+            retVal = FhgfsOpsPages_readPageCallBack(&pageData, page);
+            if (retVal)
+               break;
+         }
+         if (retVal)
+            break;
+      }
+#endif
    }
 #else
    if (pageList)
@@ -1212,5 +1255,3 @@ int FhgfsOpsPages_writeBackPage(struct inode *inode, struct page *page)
 out_error:
    return ret;
 }
-
-

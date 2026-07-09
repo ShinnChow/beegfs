@@ -160,10 +160,14 @@ struct InternodeSyncer
    NodeStoreEx* metaNodes;
    NodeStoreEx* storageNodes;
 
+   bool waitForMgmtLogged; /* to avoid log spamming, true if the message about waiting for mgmtd
+      hearbeat was logged */
    bool mgmtInitDone;
    Mutex mgmtInitDoneMutex;
    Condition mgmtInitDoneCond; // signaled when init is done (doesn't mean it was successful)
 
+   bool registrationFailureLogged; /* to avoid log spamming, true if an initial registration
+      failure was logged */
    bool nodeRegistered; // true if the mgmt host ack'ed our heartbeat
 
    bool forceTargetStatesUpdate; // force an update of target states

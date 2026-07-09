@@ -70,6 +70,7 @@ int ProcFsHelper_readV2_config(struct seq_file* file, App* app)
    seq_printf(file, "tuneDirSubentryCacheValidityMS = %u\n", Config_getTuneDirSubentryCacheValidityMS(cfg) );
    seq_printf(file, "tuneFileSubentryCacheValidityMS = %u\n", Config_getTuneFileSubentryCacheValidityMS(cfg) );
    seq_printf(file, "tuneENOENTCacheValidityMS = %u\n", Config_getTuneENOENTCacheValidityMS(cfg) );
+   seq_printf(file, "sysRemoteInvalEnabled = %d\n", (int)Config_getSysRemoteInvalEnabled(cfg) );
    seq_printf(file, "tuneRemoteFSync = %d\n", (int)Config_getTuneRemoteFSync(cfg) );
    seq_printf(file, "tuneUseGlobalFileLocks = %d\n", (int)Config_getTuneUseGlobalFileLocks(cfg) );
    seq_printf(file, "tuneRefreshOnGetAttr = %d\n", (int)Config_getTuneRefreshOnGetAttr(cfg) );
@@ -89,11 +90,10 @@ int ProcFsHelper_readV2_config(struct seq_file* file, App* app)
    seq_printf(file, "sysACLsEnabled = %d\n", (int)Config_getSysACLsEnabled(cfg) );
    seq_printf(file, "sysACLsRevalidate = %s\n",
       Config_ACLsRevalidateToStr(Config_getSysACLsRevalidate(cfg) ) );
+   seq_printf(file, "sysNFSv4ACLsEnabled = %d\n", (int)Config_getSysNFSv4ACLsEnabled(cfg) );
    seq_printf(file, "sysMgmtdHost = %s\n", Config_getSysMgmtdHost(cfg) );
    seq_printf(file, "sysInodeIDStyle = %s\n",
       Config_inodeIDStyleNumToStr(Config_getSysInodeIDStyleNum(cfg) ) );
-   seq_printf(file, "sysCacheInvalidationVersion = %d\n",
-      (int)Config_getSysCacheInvalidationVersion(cfg) );
    seq_printf(file, "sysCreateHardlinksAsSymlinks = %d\n",
       (int)Config_getSysCreateHardlinksAsSymlinks(cfg) );
    seq_printf(file, "sysMountSanityCheckMS = %u\n", Config_getSysMountSanityCheckMS(cfg) );
@@ -214,6 +214,19 @@ int ProcFsHelper_readV2_status(struct seq_file* file, App* app)
    }
 
    #endif // BEEGFS_DEBUG
+
+   return 0;
+}
+
+int ProcFsHelper_readV2_cacheStats(struct seq_file* file, App* app)
+{
+   u64 hits = atomic64_read(&app->inodeCacheHits);
+   u64 misses = atomic64_read(&app->inodeCacheMisses);
+   u64 invalidations = atomic64_read(&app->numRemoteInvals);
+
+   seq_printf(file, "inodeCacheHits: %llu\n", hits);
+   seq_printf(file, "inodeCacheMisses: %llu\n", misses);
+   seq_printf(file, "inodeCacheInvalidations: %llu\n", invalidations);
 
    return 0;
 }

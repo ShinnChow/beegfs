@@ -15,12 +15,13 @@
 #include <components/DisposalGarbageCollector.h>
 #include <program/Program.h>
 #include <session/SessionStore.h>
+#include <components/InvalWatch.h>
 #include <storage/MetadataEx.h>
 #include <toolkit/BuddyCommTk.h>
 #include <toolkit/StorageTkEx.h>
 #include "App.h"
 #include "common/app/config/AbstractConfig.h"
-#include "common/app/config/ICommonConfig.h"
+#include "common/app/config/CommonConfig.h"
 #include "common/net/sock/IPAddress.h"
 
 #include <array>
@@ -239,6 +240,12 @@ void App::runNormal()
             "ACLs cannot be stored without extended attributes.");
 
 
+   // NFSv4 ACLs need client side XAttrs enabled in order to work.
+   if (cfg->getStoreNFSv4ACLs() && !cfg->getStoreClientXAttrs() )
+      throw InvalidConfigException(
+            "NFSv4 ACLs are enabled in config file, but extended attributes are not. "
+            "NFSv4 ACLs cannot be stored without extended attributes.");
+
    // detach process
    if(cfg->getRunDaemonized() )
       daemonize();
@@ -299,7 +306,7 @@ void App::runNormal()
    }
 
    // Initialize File Event Logger if fileEventLogTarget is set
-   if (!cfg->getFileEventLogTarget().empty())
+   if (!cfg->getSysFileEventLogTarget().empty())
    {
       // Creates FileEventLogger instance which:
       // 1. Sets up Persistent Message Queue (PMQ) for event storage
@@ -323,7 +330,7 @@ void App::runNormal()
       }
 
       FileEventLoggerParams params = {};
-      params.address = cfg->getFileEventLogTarget();
+      params.address = cfg->getSysFileEventLogTarget();
       params.ids.nodeId = nodeId;
       params.ids.buddyGroupId = buddyGroupId;
 
@@ -581,7 +588,7 @@ bool App::preinitStorage()
       throw InvalidConfigException("Storage directory not initialized and "
          "initialization has been disabled: " + metaPathStr);
 
-   this->pidFileLockFD = createAndLockPIDFile(cfg->getPIDFile() ); // ignored if pidFile not defined
+   this->pidFileLockFD = createAndLockPIDFile(cfg->getPidFile() ); // ignored if pidFile not defined
 
    if(!StorageTk::createPathOnDisk(metaPath, false) )
       throw InvalidConfigException("Unable to create metadata directory: " + metaPathStr +
@@ -927,6 +934,12 @@ void App::startComponents()
    workersStart();
    commSlavesStart();
 
+   if (getConfig()->getSysRemoteInvalEnabled())
+   {
+      initialize_invalwatch(getConfig()->getTuneInvalWatchMaxObjects(),
+         (uint32_t) getConfig()->getTuneInvalWatchQueueSize());
+   }
+
    PThread::unblockInterruptSignals(); // main app thread may receive SIGINT/SIGTERM
 
    log->log(Log_DEBUG, "Components running.");
@@ -936,6 +949,8 @@ void App::stopComponents()
 {
 
    SAFE_DELETE(this->gcQueue);
+
+   uninitialize_invalwatch();
 
    // note: this method may not wait for termination of the components, because that could
    //    lead to a deadlock (when calling from signal handler)

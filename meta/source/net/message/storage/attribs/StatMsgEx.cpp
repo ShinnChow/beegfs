@@ -2,6 +2,7 @@
 #include <common/net/message/storage/attribs/StatRespMsg.h>
 #include <common/toolkit/MessagingTk.h>
 #include <net/msghelpers/MsgHelperStat.h>
+#include <components/InvalWatchClient.h>
 #include "StatMsgEx.h"
 
 
@@ -36,6 +37,8 @@ std::unique_ptr<MirroredMessageResponseState> StatMsgEx::executeLocally(Response
    std::string parentEntryID;
 
    EntryInfo* entryInfo = this->getEntryInfo();
+
+   add_target_watch_for_connected_watcher(ctx, entryInfo);
 
    if (entryInfo->getParentEntryID().empty() || (entryInfo->getEntryID() == META_ROOTDIR_ID_STR) )
    { // special case: stat for root directory

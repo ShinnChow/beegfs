@@ -11,6 +11,7 @@
 #include <common/threading/Thread.h>
 #include <common/Common.h>
 #include <toolkit/BitStore.h>
+#include <linux/fs.h>
 
 
 // program return codes
@@ -26,6 +27,7 @@ struct Logger;
 struct DatagramListener;
 struct InternodeSyncer;
 struct AckManager;
+struct InvalReader;
 struct Flusher;
 struct Node;
 struct NodeStoreEx;
@@ -45,7 +47,7 @@ struct App;
 typedef struct App App;
 
 
-extern void App_init(App* this, MountConfig* mountConfig);
+extern void App_init(App* this, struct super_block *sb, MountConfig* mountConfig);
 extern void App_uninit(App* this);
 
 extern int App_run(App* this);
@@ -113,6 +115,8 @@ static inline struct DatagramListener* App_getDatagramListener(App* this);
 static inline struct InternodeSyncer* App_getInternodeSyncer(App* this);
 static inline struct AckManager* App_getAckManager(App* this);
 static inline AtomicInt* App_getLockAckAtomicCounter(App* this);
+static inline bool App_getInvalWatchFallback(App* this);
+static inline void App_setInvalWatchFallback(App* this);
 static inline bool App_getConnRetriesEnabled(App* this);
 static inline void App_setConnRetriesEnabled(App* this, bool connRetriesEnabled);
 static inline bool App_getNetBenchModeEnabled(App* this);
@@ -122,6 +126,7 @@ static inline struct inode_operations* App_getFileInodeOps(App* this);
 static inline struct inode_operations* App_getSymlinkInodeOps(App* this);
 static inline struct inode_operations* App_getDirInodeOps(App* this);
 static inline struct inode_operations* App_getSpecialInodeOps(App* this);
+static inline struct super_block* App_getSuperBlock(App* this);
 
 #ifdef BEEGFS_DEBUG
 static inline size_t App_getNumRPCs(App* this);
@@ -178,8 +183,15 @@ struct App
    struct InternodeSyncer* internodeSyncer;
    struct AckManager* ackManager;
    struct Flusher* flusher;
+   struct InvalReader* invalReader;
+
+   // Inode cache monitoring counters (exported via /proc)
+   atomic64_t inodeCacheHits;
+   atomic64_t inodeCacheMisses;
+   atomic64_t numRemoteInvals;
 
    AtomicInt lockAckAtomicCounter; // used by remoting to generate unique lockAckIDs
+   AtomicInt invalWatchFallback;   //flag to fall back to time-based meta cache mechanism in case of error
    volatile bool connRetriesEnabled; // changed at umount and via procfs
    bool netBenchModeEnabled; // changed via procfs to disable server-side disk read/write
 
@@ -190,6 +202,7 @@ struct App
    struct inode_operations* dirInodeOps;
    struct inode_operations* specialInodeOps;
 
+   struct super_block* superBlock;
    // AF_INET or AF_INET6
    int sockDomain;
 
@@ -350,6 +363,22 @@ AtomicInt* App_getLockAckAtomicCounter(App* this)
    return &this->lockAckAtomicCounter;
 }
 
+bool App_getInvalWatchFallback(App* this)
+{
+   return AtomicInt_read(&this->invalWatchFallback);
+}
+
+void App_setInvalWatchFallback(App* this)
+{
+   // set the fallback flag and log loudly, but only on the actual 0->1 transition
+   if (AtomicInt_compareAndSwap(&this->invalWatchFallback, 0, 1) == 0)
+   {
+      printk_fhgfs(KERN_WARNING,
+         "Client meta cache invalidation DISABLED: falling back to time-based metadata caching "
+         "for the lifetime of this mount.\n");
+   }
+}
+
 bool App_getConnRetriesEnabled(App* this)
 {
    return this->connRetriesEnabled;
@@ -388,6 +417,11 @@ struct inode_operations* App_getDirInodeOps(App* this)
 struct inode_operations* App_getSpecialInodeOps(App* this)
 {
    return this->specialInodeOps;
+}
+
+struct super_block* App_getSuperBlock(App* this)
+{
+   return this->superBlock;
 }
 
 #ifdef BEEGFS_DEBUG

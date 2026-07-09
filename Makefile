@@ -46,9 +46,9 @@ DAEMONS := meta storage mon
 UTILS := fsck event_listener $(if $(WITHOUT_COMM_DEBUG),,comm_debug)
 
 # exclude components with no runnable tests from `test'.
-DO_NOT_TEST := thirdparty event_listener
+DO_NOT_TEST := thirdparty event_listener codegen
 
-ALL_COMPONENTS := thirdparty common $(DAEMONS) $(UTILS)
+ALL_COMPONENTS := thirdparty codegen common $(DAEMONS) $(UTILS)
 TIDY_COMPONENTS := $(filter-out thirdparty event_listener, $(ALL_COMPONENTS))
 
 all: daemons utils client
@@ -62,11 +62,15 @@ utils: $(patsubst %,%-all,$(UTILS))
 	@
 
 .PHONY: $(patsubst %,%-all,$(DAEMONS) $(UTILS))
-$(patsubst %,%-all,$(DAEMONS) $(UTILS)): common-all
+$(patsubst %,%-all,$(DAEMONS) $(UTILS)): codegen-all common-all
 	$(MAKE) -C $(subst -all,,$@)/build all
 
+.PHONY: codegen-all
+codegen-all: thirdparty
+	$(MAKE) -C codegen/build all
+
 .PHONY: common-all common
-common-all: thirdparty
+common-all: thirdparty codegen-all
 	$(MAKE) -C common/build all
 
 .PHONY: thirdparty
@@ -83,7 +87,7 @@ tidy: $(addsuffix -tidy,$(TIDY_COMPONENTS))
 
 define tidy_component
 .PHONY: $1-tidy
-$1-tidy:
+$1-tidy: common-all
 	+$(MAKE) -C $1/build tidy
 endef
 

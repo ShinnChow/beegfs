@@ -5,7 +5,9 @@
 #include <net/msghelpers/MsgHelperStat.h>
 #include <net/msghelpers/MsgHelperMkFile.h>
 #include <net/msghelpers/MsgHelperXAttr.h>
+#include <components/InvalWatch.h>
 #include <storage/PosixACL.h>
+#include <storage/Nfs4ACL.h>
 #include <program/Program.h>
 #include "MetaStore.h"
 
@@ -987,6 +989,55 @@ FhgfsOpsErr MetaStore::mkNewMetaFile(DirInode& dir, MkFileDetails* mkDetails,
       }
    }
 
+   // Handle NFSv4 ACL inheritance (independent of POSIX ACLs)
+   if (config->getStoreNFSv4ACLs() && makeRes == FhgfsOpsErr_SUCCESS)
+   {
+      auto [nfs4ParentRes, nfs4ParentData, ignore] = dir.getXAttr(nullptr,
+            Nfs4ACL::nfs4ACLXAttrName, XATTR_SIZE_MAX);
+
+      if (nfs4ParentRes == FhgfsOpsErr_SUCCESS)
+      {
+         Nfs4ACL parentNfs4ACL;
+         if (parentNfs4ACL.deserializeXAttr(nfs4ParentData))
+         {
+            // Create inherited ACL for file (isDirectory = false)
+            Nfs4ACL inheritedNfs4ACL = parentNfs4ACL.createInheritedACL(false);
+
+            if (!inheritedNfs4ACL.empty())
+            {
+               CharVector nfs4ACLXAttr;
+               inheritedNfs4ACL.serializeXAttr(nfs4ACLXAttr);
+
+               FhgfsOpsErr setNfs4XAttrRes = dir.setXAttr(&newEntryInfo,
+               Nfs4ACL::nfs4ACLXAttrName, nfs4ACLXAttr, 0, false);
+
+               if (setNfs4XAttrRes != FhgfsOpsErr_SUCCESS)
+               {
+                  // Note: File/Directory creation continues despite ACL inheritance failures -
+                  // this follows established NFS server practices and POSIX semantics:
+                  //
+                  // RATIONALE:
+                  // 1. RFC 3530 (NFSv4) uses "SHOULD" not "MUST" for ACL inheritance, indicating
+                  //    it's a best-effort enhancement, not a blocking requirement.
+                  // 2. POSIX create() semantics prioritize availability - if a user can create
+                  //    files in a directory, that operation should succeed regardless of
+                  //    extended attribute failures.
+                  // 3. Real NFS implementations (Linux knfsd, FreeBSD, Solaris) follow this
+                  //    pattern to avoid cascading failures in legitimate workflows.
+                  LogContext(logContext).log(Log_WARNING, "Failed to apply inherited NFSv4 ACL to "
+                                                "file. EntryID: " + newEntryID);
+               }
+            }
+         }
+         else
+         {
+            LogContext(logContext).log(Log_WARNING,
+                  "Error deserializing parent directory NFSv4 ACL during file creation.");
+         }
+      }
+      // Note: FhgfsOpsErr_NODATA is expected when parent has no NFSv4 ACL - not an error
+   }
+
    // only proceed with RST operations if rstInfo has valid version
    if (rstInfo && !rstInfo->hasInvalidVersion() && (makeRes == FhgfsOpsErr_SUCCESS))
    {
@@ -1147,6 +1198,10 @@ FhgfsOpsErr MetaStore::unlinkFileUnlocked(DirInode& subdir, const std::string& f
 
       outWasInlined = false;
    }
+
+   // Notify InvalWatch watchers of the unlinked file's own entryID. 
+   if (retVal == FhgfsOpsErr_SUCCESS || retVal == FhgfsOpsErr_INUSE)
+      invalidate_target_by_entryid(outEntryInfo->getEntryID());
 
    return retVal;
 }
@@ -2719,6 +2774,10 @@ FhgfsOpsErr MetaStore::setFileState(EntryInfo* entryInfo, const FileState& state
    {
       LogContext(logContext).log(Log_DEBUG, "Failed to set file state. EntryID: " +
          entryInfo->getEntryID() + ", FileName: " + entryInfo->getFileName());
+   }
+   else
+   {
+      invalidate_target_by_entryid(entryInfo->getEntryID());
    }
 
    // Clean up resources in reverse order of acquisition

@@ -134,7 +134,18 @@ int BuddyResyncerGatherSlave::handleDiscoveredEntry(const char* path,
       if(dirModificationTime > lastBuddyCommTimeSecs)
       { // sync candidate
          ChunkSyncCandidateDir candidate(relPathStr, thisStatic->target.getID());
-         thisStatic->syncCandidates->add(candidate, thisStatic);
+         thisStatic->syncCandidates->add(candidate, thisStatic,
+            [thisStatic, &relPathStr](unsigned waitedMS, unsigned queueLen, unsigned queueLimit)
+            {
+               LogContext("BuddyResyncerGatherSlave").log(Log_WARNING,
+                  "Possible deadlock detected while adding directory candidate to queue for targetID "
+                  + StringTk::uintToStr(thisStatic->target.getID())
+                  + "; relativePath: " + relPathStr
+                  + "; waitedMS: " + StringTk::uintToStr(waitedMS)
+                  + "; queuedEntries: " + StringTk::uintToStr(queueLen)
+                  + "; queueLimit: " + StringTk::uintToStr(queueLimit)
+                  + "; (hint: try increasing tuneResyncQueueLimit)");
+            });
          thisStatic->numDirsMatched.increase();
       }
    }
@@ -152,7 +163,18 @@ int BuddyResyncerGatherSlave::handleDiscoveredEntry(const char* path,
          std::string relPathStr = path + chunksPath.size() + 1;
 
          ChunkSyncCandidateFile candidate(relPathStr, thisStatic->target.getID());
-         thisStatic->syncCandidates->add(candidate, thisStatic);
+         thisStatic->syncCandidates->add(candidate, thisStatic,
+            [thisStatic, &relPathStr](unsigned waitedMS, unsigned queueLen, unsigned queueLimit)
+            {
+               LogContext("BuddyResyncerGatherSlave").log(Log_WARNING,
+                  "Possible deadlock detected while adding file candidate to queue for targetID "
+                  + StringTk::uintToStr(thisStatic->target.getID())
+                  + "; relativePath: " + relPathStr
+                  + "; waitedMS: " + StringTk::uintToStr(waitedMS)
+                  + "; queuedEntries: " + StringTk::uintToStr(queueLen)
+                  + "; queueLimit: " + StringTk::uintToStr(queueLimit)
+                  + "; (hint: try increasing tuneResyncQueueLimit)");
+            });
 
          thisStatic->numChunksMatched.increase();
       }

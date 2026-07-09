@@ -7,9 +7,7 @@
  * @param nicList an internal copy will be created
  * @param localRdmaNicList an internal copy will be created
  */
-void Node_init(Node* this, struct App* app, const char* alias, NumNodeID nodeNumID,
-   unsigned short portUDP, unsigned short portTCP, NicAddressList* nicList,
-   NicAddressList* localRdmaNicList)
+void Node_init(Node* this, Node_InitParams const *params)
 {
    Mutex_init(&this->mutex);
    Condition_init(&this->changeCond);
@@ -18,31 +16,35 @@ void Node_init(Node* this, struct App* app, const char* alias, NumNodeID nodeNum
    this->isActive = false;
    kref_init(&this->references);
 
-   this->numID = nodeNumID;
+   this->numID = params->nodeNumID;
+
    RWLock_init(&this->aliasAndTypeMu);
    this->alias = NULL;
    this->nodeAliasWithTypeStr = NULL;
-   this->nodeType = NODETYPE_Invalid;
-   // We don't know the node type at this stage, it is set later.
-   Node_setNodeAliasAndType(this, alias, NODETYPE_Invalid);
+   this->nodeType = params->nodeType;
+   this->portUDP = params->portUDP;
+   Node_setAliasAndTypeStr(this, params->nodeID);
 
-   this->portUDP = portUDP;
-
-   this->connPool = NodeConnPool_construct(app, this, portTCP, nicList, localRdmaNicList);
+   {
+      NodeConnPool_InitParams poolParams = {0};
+      poolParams.app = params->app;
+      poolParams.parentNode = this;
+      poolParams.streamPort = params->portTCP;
+      poolParams.nicList = params->nicList;
+      poolParams.localRdmaNicList = params->localRdmaNicList;
+   
+      this->connPool = NodeConnPool_construct(&poolParams);
+   }
 }
 
 /**
  * @param nicList an internal copy will be created
  * @param localRdmaNicList an internal copy will be created
  */
-Node* Node_construct(struct App* app, const char* nodeID, NumNodeID nodeNumID,
-   unsigned short portUDP, unsigned short portTCP, NicAddressList* nicList,
-   NicAddressList* localRdmaNicList)
+Node* Node_construct(Node_InitParams const *params)
 {
    Node* this = (Node*)os_kmalloc(sizeof(*this) );
-
-   Node_init(this, app, nodeID, nodeNumID, portUDP, portTCP, nicList, localRdmaNicList);
-
+   Node_init(this, params);
    return this;
 }
 
@@ -161,14 +163,11 @@ void Node_copyAliasWithTypeStr(Node *this, NodeString *outStr) {
    RWLock_readUnlock(&this->aliasAndTypeMu);
 }
 
-bool Node_setNodeAliasAndType(Node* this, const char *aliasInput, NodeType nodeTypeInput) {
+bool Node_setAliasAndTypeStr(Node* this, const char *aliasInput)
+{
    char *alias = NULL;
    char *aliasAndTypeStr = NULL;
    bool err = false;
-
-   if (!aliasInput && nodeTypeInput == NODETYPE_Invalid) {
-       return true; // Nothing to do, return early.
-   }
 
    if (aliasInput) {
       alias = StringTk_strDup(aliasInput);
@@ -180,12 +179,12 @@ bool Node_setNodeAliasAndType(Node* this, const char *aliasInput, NodeType nodeT
    RWLock_writeLock(&this->aliasAndTypeMu);
    {
       const char *nextAlias = alias ? alias : this->alias;
-      NodeType nextNodeType = nodeTypeInput != NODETYPE_Invalid ? nodeTypeInput : this->nodeType;
-      if (nextNodeType == NODETYPE_Client) {
-         aliasAndTypeStr = kasprintf(GFP_NOFS, "%s [%s:?]", nextAlias, Node_nodeTypeToStr(nextNodeType));
+      NodeType nodeType = this->nodeType;
+      if (nodeType == NODETYPE_Client) {
+         aliasAndTypeStr = kasprintf(GFP_NOFS, "%s [%s:?]", nextAlias, Node_nodeTypeToStr(nodeType));
       }
       else {
-         aliasAndTypeStr = kasprintf(GFP_NOFS, "%s [%s:%u]", nextAlias, Node_nodeTypeToStr(nextNodeType), this->numID.value);
+         aliasAndTypeStr = kasprintf(GFP_NOFS, "%s [%s:%u]", nextAlias, Node_nodeTypeToStr(nodeType), this->numID.value);
       }
       if (!aliasAndTypeStr) {
          err = true;
@@ -194,9 +193,6 @@ bool Node_setNodeAliasAndType(Node* this, const char *aliasInput, NodeType nodeT
    if (! err) {
       if (alias) {
          swap(this->alias, alias);
-      }
-      if (nodeTypeInput != NODETYPE_Invalid) {
-          swap(this->nodeType, nodeTypeInput);
       }
       if (aliasAndTypeStr) {
          swap(this->nodeAliasWithTypeStr, aliasAndTypeStr);

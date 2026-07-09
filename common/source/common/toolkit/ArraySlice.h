@@ -35,6 +35,16 @@ public:
       return mData[i];
    }
 
+   ArraySlice<const T> asConst() const
+   {
+      return ArraySlice<const T>(mData, mCount);
+   }
+
+   operator const ArraySlice<const T>() const  // implicit cast
+   {
+      return asConst();
+   }
+
    IterateAsValues<T> iterateAsValues() const
    {
       return IterateAsValues<T>(mData, mCount);

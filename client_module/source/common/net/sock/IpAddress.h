@@ -5,6 +5,7 @@
 #include <linux/in.h>
 #include <linux/in6.h>
 #include <net/ipv6.h>
+#include <linux/net.h>
 
 // Map IPv4 address as IPv6 address
 // ipv4 => ::FF:FF:ipv4
@@ -125,6 +126,25 @@ static inline Beegfs_Sockaddr bsa_make_for_recv(void)
 {
    Beegfs_Sockaddr out = {0};
    return out;
+}
+
+static inline int beegfs_kernel_connect(struct socket *sock, struct sockaddr *addr,
+   int addrlen, int flags)
+{
+#ifdef KERNEL_HAS_KERNEL_CONNECT_ADDR_UNSIZED
+   return kernel_connect(sock, (struct sockaddr_unsized *)addr, addrlen, flags);
+#else
+   return kernel_connect(sock, addr, addrlen, flags);
+#endif
+}
+
+static inline int beegfs_kernel_bind(struct socket *sock, struct sockaddr *addr, int addrlen)
+{
+#ifdef KERNEL_HAS_KERNEL_CONNECT_ADDR_UNSIZED
+   return kernel_bind(sock, (struct sockaddr_unsized *)addr, addrlen);
+#else
+   return kernel_bind(sock, addr, addrlen);
+#endif
 }
 
 #endif

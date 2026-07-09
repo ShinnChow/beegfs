@@ -61,7 +61,16 @@ class BuddyResyncJob : public PThread
 
       void enqueue(MetaSyncCandidateFile syncCandidate, PThread* caller)
       {
-         syncCandidates.add(std::move(syncCandidate), caller);
+         syncCandidates.add(std::move(syncCandidate), caller,
+            [] (unsigned waitedMS, unsigned queueLen, unsigned queueLimit)
+            {
+               LogContext("BuddyResyncJob").log(Log_WARNING,
+                  "Possible deadlock detected while adding file candidate to queue "
+                  "; waitedMS: " + StringTk::uintToStr(waitedMS)
+                  + "; queuedEntries: " + StringTk::uintToStr(queueLen)
+                  + "; queueLimit: " + StringTk::uintToStr(queueLimit)
+                  + "; (hint: try increasing tuneResyncQueueLimit)");
+            });
       }
 
       void registerOps()
@@ -89,4 +98,3 @@ class BuddyResyncJob : public PThread
 
       void stopAllWorkersOn(Barrier& barrier);
 };
-

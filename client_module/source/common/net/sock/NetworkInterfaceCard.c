@@ -94,8 +94,16 @@ void __NIC_findAllTCP(NicAddressFilter *nicAddressFilter, int domain, NicAddress
    // TODO: do we need to lock RTNL?
    for (dev = first_net_device(&init_net); dev; dev = next_net_device(dev))
    {
-      if(dev_get_flags(dev) & IFF_LOOPBACK)
-         continue; // loopback interface => skip
+      {
+         unsigned int flags;
+#ifdef KERNEL_HAS_NETIF_GET_FLAGS
+         flags = netif_get_flags(dev);
+#else
+         flags = dev_get_flags(dev);
+#endif
+         if (flags & IFF_LOOPBACK)
+            continue; // loopback interface => skip
+      }
 
       if (dev->type == ARPHRD_LOOPBACK)
          continue;

@@ -64,6 +64,11 @@
 #define NETMSGTYPE_RefreshStoragePools               1070
 #define NETMSGTYPE_RemoveStoragePool                 1071
 #define NETMSGTYPE_RemoveStoragePoolResp             1072
+#define NETMSGTYPE_Handshake                         1073
+#define NETMSGTYPE_HandshakeResp                     1074
+#define NETMSGTYPE_ReadInvalidations                 1075
+#define NETMSGTYPE_ReadInvalidationsResp             1076
+
 
 // storage messages
 #define NETMSGTYPE_MkDir                           2001

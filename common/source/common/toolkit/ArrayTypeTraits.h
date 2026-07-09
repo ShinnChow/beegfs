@@ -20,6 +20,12 @@ namespace
          && ! std::is_const<T>::value;
    };
 
+   template<typename T>
+   static ArraySlice<T> As_ArraySlice(std::vector<T>& v)
+   {
+      return ArraySlice(v.data(), v.size());
+   }
+
    template<typename T, size_t N> // array-ref hack to get size automatically
    static ArraySlice<T> As_ArraySlice(T (&ref)[N])
    {

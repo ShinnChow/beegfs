@@ -3,6 +3,7 @@
 #include <common/toolkit/MessagingTk.h>
 #include <program/Program.h>
 #include <storage/MetaStore.h>
+#include <components/InvalWatchClient.h>
 #include "GetEntryInfoMsgEx.h"
 
 
@@ -28,6 +29,7 @@ std::unique_ptr<MirroredMessageResponseState> GetEntryInfoMsgEx::executeLocally(
    bool isSecondary)
 {
 
+
    GetEntryInfoMsgResponseState resp;
 
    EntryInfo* entryInfo = this->getEntryInfo();
@@ -38,6 +40,8 @@ std::unique_ptr<MirroredMessageResponseState> GetEntryInfoMsgEx::executeLocally(
    uint32_t numSessionsRead = 0;
    uint32_t numSessionsWrite = 0;
    uint8_t dataState = 0;
+
+   add_target_watch_for_connected_watcher(ctx, this->getEntryInfo());
 
    if (entryInfo->getParentEntryID().empty())
    {
@@ -108,8 +112,8 @@ FhgfsOpsErr GetEntryInfoMsgEx::getInfo(EntryInfo* entryInfo, StripePattern** out
          outDataState = fileInode->getFileState().getRawValue();
 
          metaStore->releaseFile(entryInfo->getParentEntryID(), fileInode);
-         return referenceRes;
       }
+      return referenceRes;
    }
 
    return FhgfsOpsErr_PATHNOTEXISTS;

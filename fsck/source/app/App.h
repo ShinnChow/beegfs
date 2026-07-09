@@ -117,7 +117,7 @@ class App : public AbstractApp
       static void signalHandler(int sig);
 
    public:
-      virtual const ICommonConfig* getCommonConfig() const override
+      virtual const CommonConfig* getCommonConfig() const override
       {
          return cfg;
       }

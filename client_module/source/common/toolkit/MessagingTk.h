@@ -45,7 +45,7 @@ extern FhgfsOpsErr __MessagingTk_requestResponseNodeRetry(App* app,
 // inliners
 
 static inline char* MessagingTk_createMsgBuf(NetMessage* msg);
-static inline ssize_t MessagingTk_recvMsgBuf(App* app, Socket* sock, char* bufIn, size_t bufInLen);
+static inline ssize_t MessagingTk_recvMsgBuf(App* app, Socket* sock, char* bufIn, size_t bufInLen, int timeoutMS);
 
 static inline void MessagingTk_waitBeforeRetry(unsigned currentNumRetry);
 static inline int MessagingTk_getRetryWaitMS(unsigned currentNumRetry);
@@ -81,7 +81,7 @@ char* MessagingTk_createMsgBuf(NetMessage* msg)
  * @return positive message length on success, <=0 on error (e.g. -ETIMEDOUT on recv timeout,
  * -EMSGSIZE if msg too large for buffer).
  */
-ssize_t MessagingTk_recvMsgBuf(App* app, Socket* sock, char* bufIn, size_t bufInLen)
+ssize_t MessagingTk_recvMsgBuf(App* app, Socket* sock, char* bufIn, size_t bufInLen,  int timeoutMS)
 {
    const char* logContext = "MessagingTk (recv msg)";
 
@@ -89,10 +89,12 @@ ssize_t MessagingTk_recvMsgBuf(App* app, Socket* sock, char* bufIn, size_t bufIn
    ssize_t recvRes;
    size_t msgLength;
    Config* cfg = App_getConfig(app);
+   int recvTimeoutMS = (timeoutMS > 0) ? timeoutMS : cfg->connMsgLongTimeout;
+
 
    // receive at least the message header
 
-   recvRes = Socket_recvExactTEx_kernel(sock, bufIn, NETMSG_MIN_LENGTH, 0, cfg->connMsgLongTimeout,
+   recvRes = Socket_recvExactTEx_kernel(sock, bufIn, NETMSG_MIN_LENGTH, 0, recvTimeoutMS,
          &numReceived);
 
    if(unlikely(recvRes <= 0) )
@@ -123,7 +125,7 @@ ssize_t MessagingTk_recvMsgBuf(App* app, Socket* sock, char* bufIn, size_t bufIn
    }
 
    recvRes = Socket_recvExactTEx_kernel(sock, &bufIn[numReceived], msgLength-numReceived, 0,
-         cfg->connMsgLongTimeout, &numReceived);
+         recvTimeoutMS, &numReceived);
 
    if(unlikely(recvRes <= 0) )
       goto socket_exception;

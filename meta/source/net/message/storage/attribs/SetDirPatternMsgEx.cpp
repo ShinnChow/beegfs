@@ -3,6 +3,7 @@
 #include <common/toolkit/MessagingTk.h>
 #include <program/Program.h>
 #include <session/EntryLock.h>
+#include <components/InvalWatch.h>
 #include <storage/DirInode.h>
 #include <storage/MetaStore.h>
 #include "SetDirPatternMsgEx.h"
@@ -118,6 +119,8 @@ std::unique_ptr<MirroredMessageResponseState> SetDirPatternMsgEx::executeLocally
    }
 
    metaStore->releaseDir(entryInfo->getEntryID());
+   if (!isSecondary && retVal == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(entryInfo->getEntryID());
    return boost::make_unique<ResponseState>(retVal);
 }
 

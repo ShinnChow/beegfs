@@ -309,8 +309,29 @@ FhgfsOpsErr __MessagingTk_requestResponseNodeRetry(App* app, RequestResponseNode
          bool getStateRes = TargetStateStore_getState(rrNode->targetStates, nodeID.value,
             &state);
 
-         if (!getStateRes ||
-               state.reachabilityState != TargetReachabilityState_ONLINE ||
+         if (!getStateRes)
+         {
+            if (!(rrArgs->rrFlags & REQUESTRESPONSEARGS_FLAG_ALLOWSTATESLEEP))
+            {
+               LOG_DEBUG_FORMATTED(App_getLogger(app), Log_SPAM, logContext,
+               "Skipping communication with nodeID: %u; target state unavailable",
+               nodeID.value);
+
+               commRes = FhgfsOpsErr_COMMUNICATION;
+               goto exit;
+            }
+
+            Thread_sleep(MSGTK_STATE_SLEEP_MS);
+            if (fatal_signal_pending(current))
+            {
+               commRes = FhgfsOpsErr_INTERRUPTED;
+               goto exit;
+            }
+
+            currentRetryNum = 0;
+            continue;
+         }
+         if (state.reachabilityState != TargetReachabilityState_ONLINE ||
                (rrNode->peer.isMirrorGroup &&
                   state.consistencyState != TargetConsistencyState_GOOD))
          {
@@ -421,7 +442,8 @@ FhgfsOpsErr __MessagingTk_requestResponseNodeRetry(App* app, RequestResponseNode
          goto release_node_and_continue;
       }
       else
-      if(commRes != FhgfsOpsErr_COMMUNICATION)
+      if(commRes != FhgfsOpsErr_COMMUNICATION &&
+         commRes != FhgfsOpsErr_COMMTIMEDOUT)
       { // no retry allowed in this situation
          goto release_node_and_break;
       }
@@ -458,7 +480,6 @@ FhgfsOpsErr __MessagingTk_requestResponseNodeRetry(App* app, RequestResponseNode
       }
       else
       { // no more retries left
-         commRes = FhgfsOpsErr_COMMUNICATION;
          goto release_node_and_break;
       }
 
@@ -602,7 +623,7 @@ FhgfsOpsErr __MessagingTk_requestResponseWithRRArgsComm(App* app,
 
    // receive response
 
-   respRes = MessagingTk_recvMsgBuf(app, sock, rrArgs->outRespBuf, bufLen);
+   respRes = MessagingTk_recvMsgBuf(app, sock, rrArgs->outRespBuf, bufLen, rrArgs->recvTimeoutMS);
 
    if(unlikely(respRes <= 0) )
    { // error
@@ -620,11 +641,13 @@ FhgfsOpsErr __MessagingTk_requestResponseWithRRArgsComm(App* app,
             Logger_logFormatted(log, Log_WARNING, logContext,
                "Receive timed out from %s @ %s",
                nodeAndType.buf, sock->peername);
+            retVal = FhgfsOpsErr_COMMTIMEDOUT;
          }
          else {
             Logger_logFormatted(log, Log_WARNING, logContext,
                "Receive failed from %s @ %s (recv result: %zi)",
                nodeAndType.buf, sock->peername, respRes);
+            retVal = FhgfsOpsErr_COMMUNICATION;
          }
 
          Logger_logFormatted(log, Log_DEBUG, logContext,

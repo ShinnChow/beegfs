@@ -10,6 +10,17 @@
 #include <linux/pagemap.h>
 #include <linux/page-flags.h>
 
+/*
+ * Use init_fs_context only when both legacy nodev mount helpers are gone.
+ * get_sb_nodev() covers older get_sb kernels, while mount_nodev() covers the
+ * later file_system_type::mount path. mount_nodev() was removed during the
+ * Linux 6.18 development window, so kernels from that point need the
+ * fs_context path even if file_system_type::mount still exists.
+ */
+#if !defined(KERNEL_HAS_GET_SB_NODEV) && !defined(KERNEL_HAS_MOUNT_NODEV)
+#define KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+#endif
+
 #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
    int FhgfsOps_permission(struct mnt_idmap* idmap, struct inode *inode, int mask);
 #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
@@ -26,7 +37,7 @@
 #ifdef KERNEL_HAS_GET_SB_NODEV
 extern int FhgfsOps_getSB(struct file_system_type *fs_type,
    int flags, const char *dev_name, void *data, struct vfsmount *mnt);
-#else
+#elif defined(KERNEL_HAS_MOUNT_NODEV)
 extern struct dentry* FhgfsOps_mount(struct file_system_type *fs_type,
    int flags, const char *dev_name, void *data);
 #endif // LINUX_VERSION_CODE

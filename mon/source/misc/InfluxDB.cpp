@@ -64,6 +64,8 @@ void InfluxDB::insertMetaNodeData(std::shared_ptr<Node> node, const MetaNodeData
       point << ",indirectWorkListSize=" << data.indirectWorkListSize;
       point << ",directWorkListSize=" << data.directWorkListSize;
       point << ",hostnameid=\"" << data.hostnameid << "\"";
+      point << ",invalNumWatchers=" << data.invalWatchStat.numWatchers;
+      point << ",invalWatchNumInodes=" << data.invalWatchStat.numTargets;
 
    }
    else
@@ -169,6 +171,32 @@ void InfluxDB::insertStorageTargetsData(std::shared_ptr<Node> node,
    appendPoint(point.str());
 }
 
+void InfluxDB::insertMetaTargetsData(std::shared_ptr<Node> node,
+      const StorageTargetInfo& data)
+{
+   std::ostringstream point;
+   point << "metaTargets";
+   point << ",nodeID=" << escapeStringForWrite(node->getAlias());
+   point << ",nodeNumID=" << node->getNumID();
+
+   point << " diskSpaceTotal=" << data.getDiskSpaceTotal();
+   point << ",diskSpaceFree=" << data.getDiskSpaceFree();
+   point << ",inodesTotal=" << data.getInodesTotal();
+   point << ",inodesFree=" << data.getInodesFree();
+
+   std::string t;
+   if (data.getState() == TargetConsistencyState::TargetConsistencyState_GOOD)
+      t = "GOOD";
+   else if (data.getState() == TargetConsistencyState::TargetConsistencyState_NEEDS_RESYNC)
+      t = "NEEDS_RESYNC";
+   else
+      t = "BAD";
+
+   point << ",targetConsistencyState=\"" << t << "\"";
+
+   appendPoint(point.str());
+}
+
 void InfluxDB::insertClientNodeData(const std::string& id, const NodeType nodeType,
       const std::map<std::string, uint64_t>& opMap, bool perUser)
 {
@@ -210,6 +238,22 @@ void InfluxDB::insertClientNodeData(const std::string& id, const NodeType nodeTy
       appendPoint(point.str());
 }
 
+
+void InfluxDB::insertPerClientInvalWatchData(
+      std::shared_ptr<Node> node,
+      const InvalWatcherStat& entry)
+{
+   std::ostringstream point;
+   point << "invalWatchPerClient";
+   point << ",nodeID=" << escapeStringForWrite(node->getAlias());
+   point << ",nodeNumID=" << node->getNumID();
+   point << ",clientId=" << entry.clientId;
+
+   point << " watchedInodeCount=" << entry.watchedTargetCount;
+   point << ",numInvalidations=" << entry.numInvalidations;
+
+   appendPoint(point.str());
+}
 
 void InfluxDB::appendPoint(const std::string& point)
 {

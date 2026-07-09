@@ -297,7 +297,6 @@ TEST(Serialization, padFieldTo)
 
 namespace {
 enum class TestEnum1 { first = 1, second = -2, };
-GCC_COMPAT_ENUM_CLASS_OPEQNEQ(TestEnum1)
 
 struct EnumAsMod {
    auto operator()(TestEnum1& value)

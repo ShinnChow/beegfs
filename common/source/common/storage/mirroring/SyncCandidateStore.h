@@ -5,15 +5,21 @@
 #include <common/threading/PThread.h>
 #include <common/toolkit/ListTk.h>
 
+#include <functional>
 #include <mutex>
 
 template <typename SyncCandidateDir, typename SyncCandidateFile>
 class SyncCandidateStore
 {
    public:
-       SyncCandidateStore()
-          : numQueuedFiles(0), numQueuedDirs(0)
-       { }
+      static const unsigned DEFAULT_MAX_QUEUE_SIZE = 250000;
+      static const unsigned QUEUE_WAIT_WARNING_MS = 10 * 60 * 1000;
+      typedef std::function<void(unsigned, unsigned, unsigned)> QueueWaitWarningFn;
+
+      SyncCandidateStore(unsigned queueLimit = DEFAULT_MAX_QUEUE_SIZE)
+         : numQueuedFiles(0), numQueuedDirs(0),
+           maxQueueSize(queueLimit ? queueLimit : DEFAULT_MAX_QUEUE_SIZE)
+      { }
 
    private:
       typedef std::list<SyncCandidateFile> CandidateFileList;
@@ -31,23 +37,32 @@ class SyncCandidateStore
       // mainly used to avoid constant calling of size() method of lists
       unsigned numQueuedFiles;
       unsigned numQueuedDirs;
-
-      static const unsigned MAX_QUEUE_SIZE = 50000;
+      unsigned maxQueueSize;
 
    public:
-      void add(SyncCandidateFile entry, PThread* caller)
+      void add(SyncCandidateFile entry, PThread* caller,
+         const QueueWaitWarningFn& waitWarningFn = nullptr)
       {
          static const unsigned waitTimeoutMS = 1000;
+         unsigned totalWaitedMS = 0;
+         unsigned nextWarningMS = QUEUE_WAIT_WARNING_MS;
 
          std::lock_guard<Mutex> mutexLock(candidatesFileMutex);
 
          // wait if list is too big
-         while (numQueuedFiles > MAX_QUEUE_SIZE)
+         while (numQueuedFiles > maxQueueSize)
          {
             if (caller && unlikely(caller->getSelfTerminate() ) )
                break; // ignore limit if selfTerminate was set to avoid hanging on shutdown
 
             filesFetchedCond.timedwait(&candidatesFileMutex, waitTimeoutMS);
+            totalWaitedMS += waitTimeoutMS;
+
+            if (waitWarningFn && totalWaitedMS >= nextWarningMS)
+            {
+               waitWarningFn(totalWaitedMS, numQueuedFiles, maxQueueSize);
+               nextWarningMS += QUEUE_WAIT_WARNING_MS;
+            }
          }
 
          this->candidatesFile.push_back(std::move(entry));
@@ -79,19 +94,29 @@ class SyncCandidateStore
          filesFetchedCond.signal();
       }
 
-      void add(SyncCandidateDir entry, PThread* caller)
+      void add(SyncCandidateDir entry, PThread* caller,
+         const QueueWaitWarningFn& waitWarningFn = nullptr)
       {
          static const unsigned waitTimeoutMS = 3000;
+         unsigned totalWaitedMS = 0;
+         unsigned nextWarningMS = QUEUE_WAIT_WARNING_MS;
 
          std::lock_guard<Mutex> mutexLock(candidatesDirMutex);
 
          // wait if list is too big
-         while (numQueuedDirs > MAX_QUEUE_SIZE)
+         while (numQueuedDirs > maxQueueSize)
          {
             if (caller && unlikely(caller->getSelfTerminate() ) )
                break; // ignore limit if selfTerminate was set to avoid hanging on shutdown
 
             dirsFetchedCond.timedwait(&candidatesDirMutex, waitTimeoutMS);
+            totalWaitedMS += waitTimeoutMS;
+
+            if (waitWarningFn && totalWaitedMS >= nextWarningMS)
+            {
+               waitWarningFn(totalWaitedMS, numQueuedDirs, maxQueueSize);
+               nextWarningMS += QUEUE_WAIT_WARNING_MS;
+            }
          }
 
          this->candidatesDir.push_back(std::move(entry));
@@ -243,4 +268,3 @@ class SyncCandidateStore
          filesAddedCond.broadcast();
       }
 };
-

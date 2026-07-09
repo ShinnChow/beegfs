@@ -21,6 +21,7 @@ BuddyResyncJob::BuddyResyncJob() :
    PThread("BuddyResyncJob"),
    state(BuddyResyncJobState_NOTSTARTED),
    startTime(0), endTime(0),
+   syncCandidates(Program::getApp()->getConfig()->getTuneResyncQueueLimit()),
    gatherSlave(boost::make_unique<BuddyResyncerGatherSlave>(&syncCandidates))
 {
    App* app = Program::getApp();

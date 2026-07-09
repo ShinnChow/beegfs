@@ -2,7 +2,7 @@
 
 #include "common/net/sock/IPAddress.h"
 #include <common/app/log/Logger.h>
-#include <common/app/config/ICommonConfig.h>
+#include <common/app/config/CommonConfig.h>
 #include <common/net/message/AbstractNetMessageFactory.h>
 #include <common/threading/PThread.h>
 #include <common/toolkit/BitStore.h>
@@ -34,7 +34,7 @@ class AbstractApp : public PThread
 
       static void handleOutOfMemFromNew();
 
-      virtual const ICommonConfig* getCommonConfig() const = 0;
+      virtual const CommonConfig* getCommonConfig() const = 0;
       virtual const NetFilter* getNetFilter() const = 0;
       virtual const NetFilter* getTcpOnlyFilter() const = 0;
       virtual const AbstractNetMessageFactory* getNetMessageFactory() const = 0;

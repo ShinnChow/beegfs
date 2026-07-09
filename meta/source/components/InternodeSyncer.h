@@ -80,9 +80,6 @@ class InternodeSyncer : public PThread
       void dropIdleConns();
       unsigned dropIdleConnsByStore(NodeStoreServers* nodes);
 
-      void getStatInfo(int64_t* outSizeTotal, int64_t* outSizeFree, int64_t* outInodesTotal,
-         int64_t* outInodesFree);
-
       static TargetConsistencyState decideResync(const CombinedTargetState newState);
       static bool publishNodeStateChange(const TargetConsistencyState oldState,
          const TargetConsistencyState newState);

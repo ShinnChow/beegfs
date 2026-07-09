@@ -15,19 +15,30 @@
 struct App;
 
 
-enum NodeType;
 typedef enum NodeType NodeType;
+enum NodeType
+   {NODETYPE_Invalid = 0, NODETYPE_Meta = 1, NODETYPE_Storage = 2, NODETYPE_Client = 3,
+   NODETYPE_Mgmt = 4};
 
 struct Node;
 typedef struct Node Node;
 
 
-extern void Node_init(Node* this, struct App* app, const char* nodeID, NumNodeID nodeNumID,
-   unsigned short portUDP, unsigned short portTCP, NicAddressList* nicList,
-   NicAddressList* localRdmaNicList);
-extern Node* Node_construct(struct App* app, const char* nodeID, NumNodeID nodeNumID,
-   unsigned short portUDP, unsigned short portTCP, NicAddressList* nicList,
-   NicAddressList* localRdmaNicList);
+typedef struct Node_InitParams Node_InitParams;
+struct Node_InitParams
+{
+   struct App* app;
+   const char* nodeID;
+   NumNodeID nodeNumID;
+   NodeType nodeType;
+   unsigned short portUDP;
+   unsigned short portTCP;
+   NicAddressList* nicList;
+   NicAddressList* localRdmaNicList;
+};
+
+extern void Node_init(Node* this, Node_InitParams const *params);
+extern Node* Node_construct(Node_InitParams const *params);
 extern void Node_uninit(Node* this);
 extern void __Node_destruct(Node* this);
 
@@ -85,21 +96,16 @@ extern const char* Node_nodeTypeToStr(NodeType nodeType);
 // getters & setters
 
 /**
- * Node_setNodeAliasAndType() handles thread safe updates to the alias (formerly node string ID),
- * node type, and nodeAliasWithTypeStr. It blocks until other writers (unlikely) have finished
+ * Node_setAliasAndTypeStr() handles thread safe updates to the alias (formerly node string ID),
+ * and nodeAliasWithTypeStr. It blocks until other writers (unlikely) have finished
  * making updates or readers (more likely) have released these fields with the corresponding
  * Node_putX functions.
  *
- * @param this is a pointer to the Node structure with the alias, nodeType, and
- * nodeAliasWithTypeStr.
+ * @param this is a pointer to the Node structure with the alias, and nodeAliasWithTypeStr.
  * @param alias is the alias to set. Copies the alias and does not take ownership of it. The caller
  * is responsible for freeing the alias when appropriate.
- * @param nodeType the nodeType to set.
- *
- * The alias or nodeType can be respectively NULL or set to NODETYPE_Invalid to only update one
- * field and update the nodeAliasWithTypeStr.
  */
-extern bool Node_setNodeAliasAndType(Node* this, const char *alias, NodeType nodeType);
+extern bool Node_setAliasAndTypeStr(Node* this, const char *alias);
 static inline NumNodeID Node_getNumID(Node* this);
 static inline void Node_setNumID(Node* this, const NumNodeID numID);
 static inline void Node_cloneNicList(Node* this, NicAddressList* nicList);
@@ -112,10 +118,6 @@ static inline unsigned short Node_getPortUDP(Node* this);
 static inline unsigned short Node_getPortTCP(Node* this);
 static inline NodeType Node_getNodeType(Node* this);
 static inline const char* Node_getNodeTypeStr(Node* this);
-
-enum NodeType
-   {NODETYPE_Invalid = 0, NODETYPE_Meta = 1, NODETYPE_Storage = 2, NODETYPE_Client = 3,
-   NODETYPE_Mgmt = 4};
 
 
 struct Node
@@ -162,6 +164,7 @@ static inline int Node_put(Node* node)
 {
    return kref_put(&node->references, __Node_put);
 }
+
 
 NumNodeID Node_getNumID(Node* this)
 {
@@ -245,10 +248,7 @@ unsigned short Node_getPortTCP(Node* this)
 
 NodeType Node_getNodeType(Node* this)
 {
-   NodeType nodeType;
-   RWLock_readLock(&this->aliasAndTypeMu);
-   nodeType = this->nodeType;
-   RWLock_readUnlock(&this->aliasAndTypeMu);
+   NodeType nodeType = this->nodeType;
    return nodeType;
 }
 

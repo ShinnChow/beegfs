@@ -63,6 +63,18 @@
 
 override V := $(if $V,,@)
 
+
+# This is supposed to disable built-in targets / rules / recipes. With the
+# built-in targets, for example a mistyped:
+#    make a/b/c/Main.o
+# Would try to build that file from a/b/c/Main.cpp (which exists). But it
+# wouldn't use our own rules correctly, because we defined them only for
+# a/b/c/Main.cpp.o, so we actually should have typed:
+#    make a/b/c/Main.cpp.o
+# By disabling the implicit stuff, we now get an error message when
+# accidentally typing the wrong thing.
+.SUFFIXES:
+
 all:
 
 define HELP_ARGS_GENERIC
@@ -97,6 +109,8 @@ help:
 root_dir := $(realpath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 build_dir := $(realpath $(dir $(firstword $(MAKEFILE_LIST))))
 
+BEEGFS_BASE_PATH               ?= $(root_dir)/base
+BEEGFS_CODEGEN_PATH            ?= $(root_dir)/codegen
 BEEGFS_COMMON_PATH             ?= $(root_dir)/common
 BEEGFS_COMMON_PCH_H            ?= $(BEEGFS_COMMON_PATH)/source/common/pch.h
 BEEGFS_THIRDPARTY_PATH         ?= $(root_dir)/thirdparty
@@ -130,28 +144,55 @@ ifeq ($(shell ar -TM 2>&1 <<<""),)
 AR += -T
 endif
 
-CXXFLAGS = \
-   -std=c++17 -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 \
-   -isystem $(BOOST_INC_PATH) -isystem $(NU_INC_PATH) \
-   -pthread \
-   -fno-strict-aliasing -fmessage-length=0 \
-   -Wall -Wextra -Wunused-variable -Woverloaded-virtual -Wno-unused-parameter -Wuninitialized \
-      -Wno-missing-field-initializers \
-      -Winvalid-pch \
-   -ggdb3 \
-   $(USER_CXXFLAGS)
 CXXFLAGS_RELEASE = -O3 -Wuninitialized
 CXXFLAGS_DEBUG = -O1 -D_FORTIFY_SOURCE=2 \
    -DBEEGFS_DEBUG -DDEBUG_READWRITE -DDEBUG_MUTEX_LOCKING -DDEBUG_REFCOUNT \
    -DDEBUG_BACKTRACE  -DLOG_DEBUG_MESSAGES
-CXXFLAGS_COVERAGE = --coverage -O1 -fno-inline
 
-LDFLAGS = \
-   -rdynamic \
-   -pthread -lrt \
-   -Wl,-rpath,'$$ORIGIN/../lib' \
-   $(USER_LDFLAGS)
+CXXFLAGS_COVERAGE = --coverage -O1 -fno-inline
 LDFLAGS_COVERAGE = --coverage
+
+CXXFLAGS =
+CXXFLAGS += -std=c++17
+CXXFLAGS += -D_LARGEFILE64_SOURCE
+CXXFLAGS += -D_FILE_OFFSET_BITS=64
+CXXFLAGS += -isystem $(BOOST_INC_PATH)
+CXXFLAGS += -isystem $(NU_INC_PATH)
+CXXFLAGS += -pthread
+CXXFLAGS += -fno-strict-aliasing
+CXXFLAGS += -fmessage-length=0
+CXXFLAGS += -Wall
+CXXFLAGS += -Wextra
+CXXFLAGS += -Wunused-variable
+CXXFLAGS += -Woverloaded-virtual
+CXXFLAGS += -Wno-unused-parameter
+CXXFLAGS += -Wuninitialized
+CXXFLAGS += -Wno-missing-field-initializers
+CXXFLAGS += -Winvalid-pch
+CXXFLAGS += -ggdb3
+CXXFLAGS += $(USER_CXXFLAGS)
+
+
+# explicit linking of some libraries that weren't implicit on older compilers
+# We can't immediately assign them to LDFLAGS, since they might have to be reordered behind dependent libraries
+COMPAT_LDFLAGS =
+ifneq ($(shell $(CXX) $(CXXFLAGS) --print-file-name=librt.a),librt.a)
+COMPAT_LDFLAGS += -lrt
+endif
+ifneq ($(shell $(CXX) $(CXXFLAGS) --print-file-name=libatomic.a),libatomic.a)
+COMPAT_LDFLAGS += -latomic
+endif
+ifneq ($(shell $(CXX) $(CXXFLAGS) --print-file-name=libstdc++fs.a),libstdc++fs.a)
+COMPAT_LDFLAGS += -lstdc++fs
+endif
+
+
+LDFLAGS =
+LDFLAGS += -rdynamic
+LDFLAGS += -pthread
+
+LDFLAGS += -Wl,-rpath,'$$ORIGIN/../lib'
+LDFLAGS += $(USER_LDFLAGS)
 
 ifneq ($(BEEGFS_DEBUG),)
 CXXFLAGS += $(CXXFLAGS_DEBUG)
@@ -161,7 +202,6 @@ LDFLAGS += $(LDFLAGS_COVERAGE)
 else
 CXXFLAGS += $(CXXFLAGS_RELEASE)
 endif
-
 
 CXXFLAGS += -DBEEGFS_VERSION="\"$(BEEGFS_VERSION)\""
 
@@ -250,9 +290,16 @@ ifeq ($(strip $(MAKECMDGOALS)),clean)
    resolve-dep-ldflags :=
    resolve-dep-deps :=
 else
+   $(call define-dep-lib, beegfs-base,\
+      -I $(BEEGFS_BASE_PATH)/include,\
+   )
+
+   $(call define-dep-lib, beegfs-codegen,\
+      -I $(BEEGFS_CODEGEN_PATH)/include,\
+      -ldl $(BEEGFS_CODEGEN_PATH)/build/libbeegfs-codegen.a)
+
    $(call define-dep-lib, common,\
-      -I $(BEEGFS_COMMON_PATH)/source \
-      -I $(BEEGFS_CLIENT_PATH), \
+      -I $(BEEGFS_COMMON_PATH)/source, \
       -ldl $(BEEGFS_COMMON_PATH)/build/libbeegfs-common.a)
 
    $(call define-dep-lib, client-devel,\
@@ -492,29 +539,24 @@ endef
 #  #2: sources
 #  #3: required libraries
 #  #4: include directories
-build-executable = $(eval $(call -build-executable-fragment,$(strip $1),$2,$3,$4))
-define -build-executable-fragment
-all: $1
+#  #5: target dependencies (all built' sources will depend on them, can use .PHONY targets)
+build-executable = \
+	$(eval $(call -build-objects-fragment,$(strip $1),$2,$3,$4,$5)) \
+	$(eval $(call -build-executable-fragment,$(strip $1),$2,$3,$4,$5))
 
-$(call -build-pch-fragment,$1,$2)
-
-CLEANUP_FILES += $1 $(addsuffix .o,$2) $(addsuffix .d,$2)
-
-$(addsuffix .o .tidy-%,$2): CXXFLAGS += \
-   $(foreach lib,$3,$(call resolve-dep-cflags,$(lib))) $(addprefix -I, $4)
-
-$1: LDFLAGS += \
-   -Wl,--start-group $(foreach lib,$3,$(call resolve-dep-ldflags,$(lib))) -Wl,--end-group
-
-$1: $(addsuffix .o,$2) $(foreach lib,$3,$(call resolve-dep-deps,$(lib)))
-	@echo "[LD]	$$@"
-	$$V$$(CXX) -o $$@ $(addsuffix .o,$2) $$(LDFLAGS)
-
--include $(addsuffix .d,$2)
-
-$(call make-tidy-rule, $1, $2,\
-   $(foreach lib,$3,$(call resolve-dep-cflags,$(lib))) $(addprefix -I, $4))
-endef
+# build-codegen
+# 
+# define a codegen phase for the build
+# arguments:
+#  #1: executable to build and run
+#  #2: sources to build the executable
+#  #3: required libraries
+#  #4: include directories
+#  #5: output files
+build-codegen = \
+	$(eval $(call -build-objects-fragment,$(strip $1),$2,$3,$4,)) \
+	$(eval $(call -build-executable-fragment,$(strip $1),$2,$3,$4,)) \
+	$(eval $(call -build-codegen-fragment,$(strip $1),,,,$5))
 
 # build-test
 #
@@ -524,8 +566,9 @@ endef
 #  #2: sources
 #  #3: required libraries (not including gtest)
 #  #4: included directories (not including gtest)
+#  #5: target dependencies (all built' sources will depend on them, can use .PHONY targets)
 define build-test
-$(call build-executable, $1, $2, $3, $4 -isystem $(GTEST_INC_PATH))
+$(call build-executable, $1, $2, $3, $4 -isystem $(GTEST_INC_PATH),$5)
 
 $1: LDFLAGS += $(GTEST_LIB_PATH)/libgtest.a
 endef
@@ -538,29 +581,10 @@ endef
 #  #2: sources
 #  #3: required libraries
 #  #4: include directories
-build-static-library = $(eval $(call -build-static-library-fragment,lib$(strip $1).a,$2,$3,$4))
-define -build-static-library-fragment
-all: $1
-
-$(call -build-pch-fragment,$1,$2)
-
-CLEANUP_FILES += $1 $(addsuffix .o,$2) $(addsuffix .d,$2)
-
-$(addsuffix .o .tidy-%,$2): CXXFLAGS += \
-   $(foreach lib,$3,$(call resolve-dep-cflags,$(lib))) $(addprefix -I, $4)
-
-$(build_dir)/$1: $(addsuffix .o,$2)
-	@echo "[AR]	$1"
-	@rm -f $$@
-	$$V$(AR) -rcs $$@ $$^
-
-$1: $(build_dir)/$1
-
--include $(addsuffix .d,$2)
-
-$(call make-tidy-rule, $1, $2,\
-   $(foreach lib,$3,$(call resolve-dep-cflags,$(lib))) $(addprefix -I, $4))
-endef
+#  #5: target dependencies (all built' sources will depend on them, can use .PHONY targets)
+build-static-library = \
+    $(eval $(call -build-objects-fragment,lib$(strip $1).a,$2,$3,$4,$5)) \
+    $(eval $(call -build-static-library-fragment,lib$(strip $1).a,$2,$3,$4,$5))
 
 # build-shared-library
 #
@@ -570,29 +594,69 @@ endef
 #  #2: sources
 #  #3: required libraries
 #  #4: include directories
-build-shared-library = $(eval $(call -build-shared-library-fragment,lib$(strip $1).so,$2,$3,$4))
-define -build-shared-library-fragment
+#  #5: target dependencies (building any source file will depend on this, can use .PHONY targets)
+build-shared-library = \
+    $(eval $(call -build-objects-fragment,lib$(strip $1).so,$2,$3,$4,$5)) \
+    $(eval $(call -build-shared-library-fragment,lib$(strip $1).so,$2,$3,$4,$5))
+
+
+# -build-objects-fragment
+#
+# helper for:
+#  -build-executable
+#  -build-static-library
+#  -build-shared-library
+define -build-objects-fragment
 all: $1
-
 $(call -build-pch-fragment,$1,$2)
-
 CLEANUP_FILES += $1 $(addsuffix .o,$2) $(addsuffix .d,$2)
+$(addsuffix .o,$2) $(addsuffix .tidy-$1,$2): $5
+$(addsuffix .o,$2) $(addsuffix .tidy-$1,$2): CXXFLAGS += \
+   $(foreach lib,$3,$(call resolve-dep-cflags,$(lib))) $(addprefix -I, $4)
+-include $(addsuffix .d,$2)
+$(call make-tidy-rule, $1, $2,\
+   $(foreach lib,$3,$(call resolve-dep-cflags,$(lib))) $(addprefix -I, $4))
+$1: $(build_dir)/$1
+$(build_dir)/$1: $(addsuffix .o,$2) $(foreach lib,$3,$(call resolve-dep-deps,$(lib)))
+# (build recipe for $(build_dir)/$1 in individual rules for executable/static lib/shared lib)
+endef
 
-$(addsuffix .o .tidy-%,$2): CXXFLAGS += \
-   -fPIC $(foreach lib,$3,$(call resolve-dep-cflags,$(lib))) $(addprefix -I, $4)
+define -build-static-library-fragment
+$(build_dir)/$1: $(addsuffix .o,$2)
+	@echo "[AR]	$1"
+	@rm -f $$@
+	$$V$(AR) -rcs $$@ $$^
+endef
 
+define -build-shared-library-fragment
+$(addsuffix .o,$2): CXXFLAGS += -fPIC
+$(addsuffix .tidy-$1,$2): CXXFLAGS += -fPIC
 $1: LDFLAGS += \
   -Wl,--start-group $(foreach lib,$3,$(call resolve-dep-ldflags,$(lib))) -Wl,--end-group
-
 $(build_dir)/$1: $(addsuffix .o,$2) $(foreach lib,$3,$(call resolve-dep-deps,$(lib)))
 	@echo "[LD]	$1"
 	$$V$$(CXX) -shared -o $$@ $(addsuffix .o,$2) \
 		-Wl,--whole-archive $$(LDFLAGS) -Wl,--no-whole-archive
+endef
 
-$1: $(build_dir)/$1
+define -build-executable-fragment
+$1: LDFLAGS += \
+   -Wl,--start-group $(foreach lib,$3,$(call resolve-dep-ldflags,$(lib))) -Wl,--end-group
+$(build_dir)/$1:
+	@echo "[LD]	$$@"
+	$$V$$(CXX) -o $$@ $(addsuffix .o,$2) $$(LDFLAGS) $$(COMPAT_LDFLAGS)
+endef
 
--include $(addsuffix .d,$2)
-
-$(call make-tidy-rule, $1, $2,\
-   $(foreach lib,$3,$(call resolve-dep-cflags,$(lib))) $(addprefix -I, $4))
+#  #1: executable to build and run
+#  #5: output files
+define -build-codegen-fragment
+CLEANUP_FILES += $5
+# $1 produces ALL of $5 in one run. Only the first output carries the recipe;
+# the rest just depend on it, so make never runs $1 twice under -j and races on
+# its temp files. (Portable: avoids the grouped-target '&:', which needs GNU
+# make >= 4.3 and is silently ignored on older make, e.g. ubuntu:20.04.)
+$(wordlist 2,$(words $5),$5): $(firstword $5)
+$(firstword $5): $1
+	@echo "[CODEGEN]	$$@"
+	$1
 endef

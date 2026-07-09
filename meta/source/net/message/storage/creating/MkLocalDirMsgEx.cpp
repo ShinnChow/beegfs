@@ -1,6 +1,7 @@
 #include <common/net/message/control/GenericResponseMsg.h>
 #include <program/Program.h>
 #include <common/net/message/storage/creating/MkLocalDirRespMsg.h>
+#include <storage/Nfs4ACL.h>
 
 #include "MkLocalDirMsgEx.h"
 
@@ -53,6 +54,30 @@ std::unique_ptr<MirroredMessageResponseState> MkLocalDirMsgEx::executeLocally(Re
    newDir.setParentInfoInitial(entryInfo->getParentEntryID(), parentNodeID);
 
    FhgfsOpsErr mkRes = metaStore->makeDirInode(newDir, getDefaultACLXAttr(), getAccessACLXAttr() );
+
+   // apply inherited NFSv4 ACL (independent of POSIX ACLs)
+   if (!getNfs4ACLXAttr().empty() && (mkRes == FhgfsOpsErr_SUCCESS))
+   {
+      FhgfsOpsErr setNfs4XAttrRes = newDir.setXAttr(nullptr, Nfs4ACL::nfs4ACLXAttrName,
+                                                   getNfs4ACLXAttr(), 0);
+
+      if (setNfs4XAttrRes != FhgfsOpsErr_SUCCESS)
+      {
+         // Note: File/Directory creation continues despite ACL inheritance failures -
+         // this follows established NFS server practices and POSIX semantics:
+         //
+         // RATIONALE:
+         // 1. RFC 3530 (NFSv4) uses "SHOULD" not "MUST" for ACL inheritance, indicating
+         //    it's a best-effort enhancement, not a blocking requirement.
+         // 2. POSIX create() semantics prioritize availability - if a user can create
+         //    files in a directory, that operation should succeed regardless of
+         //    extended attribute failures.
+         // 3. Real NFS implementations (Linux knfsd, FreeBSD, Solaris) follow this
+         //    pattern to avoid cascading failures in legitimate workflows.
+         LogContext("MkLocalDir").log(Log_WARNING, "Failed to apply inherited NFSv4 ACL to directory " +
+            newDir.getID());
+      }
+   }
 
    if (!rstInfo->hasInvalidVersion() && (mkRes == FhgfsOpsErr_SUCCESS))
    {

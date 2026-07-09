@@ -4,6 +4,7 @@
 #include <net/msghelpers/MsgHelperStat.h>
 #include <common/storage/EntryInfo.h>
 #include <program/Program.h>
+#include <components/InvalWatchClient.h>
 #include <session/EntryLock.h>
 #include <storage/MetaStore.h>
 #include "RefreshEntryInfoMsgEx.h"
@@ -43,6 +44,7 @@ std::tuple<FileIDLock, FileIDLock> RefreshEntryInfoMsgEx::lock(EntryLockStore& s
 std::unique_ptr<MirroredMessageResponseState> RefreshEntryInfoMsgEx::executeLocally(
    ResponseContext& ctx, bool isSecondary)
 {
+   add_target_watch_for_connected_watcher(ctx, getEntryInfo());
    if (getEntryInfo()->getParentEntryID().empty()) // special case: get info for root directory
       return boost::make_unique<ResponseState>(refreshInfoRoot());
    else

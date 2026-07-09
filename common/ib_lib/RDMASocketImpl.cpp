@@ -271,7 +271,17 @@ ssize_t RDMASocketImpl::recv(void *buf, size_t len, int flags)
    }
 
    if(recvRes == 0)
+   {
+      // recv() returning 0 is ambiguous: caller passed len == 0 (POSIX
+      // no-op) vs. peer orderly shutdown. Only the latter is a real
+      // disconnect. Without this guard, zero-length reads from higher
+      // layers (e.g. empty user xattr during buddy resync) falsely
+      // tear down a healthy connection.
+      if (len == 0)
+         return 0;
+
       throw SocketDisconnectException(std::string("Soft disconnect from ") + peername);
+   }
    else
       throw SocketDisconnectException(std::string("Recv(): Hard disconnect from ") + peername);
 }
@@ -294,6 +304,13 @@ ssize_t RDMASocketImpl::recvT(void *buf, size_t len, int flags, int timeoutMS)
 
    if(recvRes == -ETIMEDOUT)
       throw SocketTimeoutException("Receive timed out from: " + peername);
+   else if(recvRes == 0 && len == 0)
+      // recvT() returning 0 is ambiguous: caller passed len == 0 (POSIX
+      // no-op) vs. peer orderly shutdown. Only the latter is a real
+      // disconnect. Without this guard, zero-length reads from higher
+      // layers (e.g. empty user xattr during buddy resync) falsely
+      // tear down a healthy connection.
+      return 0;
    else
       throw SocketDisconnectException("Received disconnect from: " + peername);
 }

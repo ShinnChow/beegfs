@@ -5,6 +5,9 @@
 #include <common/net/sock/NetworkInterfaceCard.h>
 #include <toolkit/BitStore.h>
 
+// Request compat flag: client supports registration rejections
+#define REGISTERNODEMSG_COMPATFLAG_CLIENT_SUPPORTS_REGREJ  1
+
 struct RegisterNodeMsg;
 typedef struct RegisterNodeMsg RegisterNodeMsg;
 
@@ -45,6 +48,8 @@ extern const struct NetMessageOps RegisterNodeMsg_Ops;
 void RegisterNodeMsg_init(RegisterNodeMsg* this)
 {
    NetMessage_init(&this->netMessage, NETMSGTYPE_RegisterNode, &RegisterNodeMsg_Ops);
+   NetMessage_addMsgHeaderCompatFeatureFlag(&this->netMessage,
+                                            REGISTERNODEMSG_COMPATFLAG_CLIENT_SUPPORTS_REGREJ);
 }
 
 /**

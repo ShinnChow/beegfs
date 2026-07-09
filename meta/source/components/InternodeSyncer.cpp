@@ -186,6 +186,10 @@ void InternodeSyncer::syncLoop()
          }
          else
          {
+            // There is no "invalid" TargetConsistencyState that could be used as the
+            // default/uninitialized value. Only call setNodeConsistencyState() if
+            // updateMetaStatesAndBuddyGroups() actually returns a valid consistency state.
+            // Otherwise just leave it unmodified.
             TargetConsistencyState newConsistencyState;
             if (updateMetaStatesAndBuddyGroups(newConsistencyState, true))
                setNodeConsistencyState(newConsistencyState);
@@ -426,6 +430,9 @@ bool InternodeSyncer::registerNode(AbstractDatagramListener* dgramLis)
  * Download and sync metadata server target states and mirror buddy groups.
  *
  * @param outConsistencyState The new node consistency state.
+ *
+ * @returns a bool indicating if outConsistencyState is actually set. Callers should rely on this to
+ * avoid using an improperly initialized TargetConsistencyState as there is no "invalid" state.
  */
 bool InternodeSyncer::updateMetaStatesAndBuddyGroups(TargetConsistencyState& outConsistencyState,
    bool publish)
@@ -457,6 +464,7 @@ bool InternodeSyncer::updateMetaStatesAndBuddyGroups(TargetConsistencyState& out
 
    LOG(STATES, DEBUG, "Beginning target state update...");
    bool publishSuccess = false;
+   bool setOutConsistencyState = false;
 
    while (!publishSuccess && (numRetries--) )
    {
@@ -500,6 +508,7 @@ bool InternodeSyncer::updateMetaStatesAndBuddyGroups(TargetConsistencyState& out
 
       TargetConsistencyState localChangedState = decideResync(newStateFromMgmtd);
       outConsistencyState = localChangedState;
+      setOutConsistencyState = true;
 
       if (!publish)
       {
@@ -535,7 +544,7 @@ bool InternodeSyncer::updateMetaStatesAndBuddyGroups(TargetConsistencyState& out
    else
       publishFailedLogged = false;
 
-   return true;
+   return setOutConsistencyState;
 }
 
 /**
@@ -1001,7 +1010,15 @@ void InternodeSyncer::publishNodeCapacity()
    int64_t inodesFree = 0;
 
    std::string metaPath = app->getMetaPath();
-   getStatInfo(&sizeTotal, &sizeFree, &inodesTotal, &inodesFree);
+
+   if (!StorageTk::statStoragePath(metaPath, &sizeTotal, &sizeFree, &inodesTotal, &inodesFree))
+   {
+      log.logErr("Unable to statfs() storage path: " + metaPath +
+         " (SysErr: " + System::getErrString() + ")");
+      sizeTotal = sizeFree = inodesTotal = inodesFree = -1;
+   }
+   // read and use value from manual free space override file (if it exists)
+   StorageTk::statStoragePathOverride(metaPath, &sizeFree, &inodesFree);
 
    StorageTargetInfo targetInfo(app->getLocalNodeNumID().val(), metaPath, sizeTotal, sizeFree,
       inodesTotal, inodesFree, getNodeConsistencyState());
@@ -1097,31 +1114,6 @@ unsigned InternodeSyncer::dropIdleConnsByStore(NodeStoreServers* nodes)
    }
 
    return numDroppedConns;
-}
-
-void InternodeSyncer::getStatInfo(int64_t* outSizeTotal, int64_t* outSizeFree,
-   int64_t* outInodesTotal, int64_t* outInodesFree)
-{
-   const char* logContext = "GetStorageTargetInfoMsg (stat path)";
-
-   std::string targetPathStr = Program::getApp()->getMetaPath();
-
-   bool statSuccess = StorageTk::statStoragePath(targetPathStr, outSizeTotal, outSizeFree,
-      outInodesTotal, outInodesFree);
-
-   if(unlikely(!statSuccess) )
-   { // error
-      LogContext(logContext).logErr("Unable to statfs() storage path: " + targetPathStr +
-         " (SysErr: " + System::getErrString() );
-
-      *outSizeTotal = -1;
-      *outSizeFree = -1;
-      *outInodesTotal = -1;
-      *outInodesFree = -1;
-   }
-
-   // read and use value from manual free space override file (if it exists)
-   StorageTk::statStoragePathOverride(targetPathStr, outSizeFree, outInodesFree);
 }
 
 /**

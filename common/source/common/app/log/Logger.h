@@ -1,6 +1,6 @@
 #pragma once
 
-#include <common/app/config/ICommonConfig.h>
+#include <common/app/config/CommonConfig.h>
 #include <common/app/config/InvalidConfigException.h>
 #include <common/storage/StorageErrors.h>
 #include <common/threading/Atomics.h>

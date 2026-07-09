@@ -1,6 +1,7 @@
 #include <program/Program.h>
 #include <common/net/message/storage/attribs/ListXAttrRespMsg.h>
 #include <net/msghelpers/MsgHelperXAttr.h>
+#include <components/InvalWatchClient.h>
 #include "ListXAttrMsgEx.h"
 
 bool ListXAttrMsgEx::processIncoming(ResponseContext& ctx)
@@ -40,6 +41,7 @@ std::unique_ptr<MirroredMessageResponseState> ListXAttrMsgEx::executeLocally(Res
       listXAttrRes = FhgfsOpsErr_NOTSUPP;
       goto resp;
    }
+   add_target_watch_for_connected_watcher(ctx, entryInfo);
 
    std::tie(listXAttrRes, xAttrVec) = MsgHelperXAttr::listxattr(entryInfo);
 

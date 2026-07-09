@@ -277,6 +277,17 @@ unlock:
 }
 
 
+uint16_t MirrorBuddyGroupMapper_getBuddyGroupID(MirrorBuddyGroupMapper* this, uint16_t targetID)
+{
+   uint16_t groupID;
+
+   RWLock_readLock(&this->rwlock);
+   groupID = __MirrorBuddyGroupMapper_getBuddyGroupIDUnlocked(this, targetID);
+   RWLock_readUnlock(&this->rwlock);
+
+   return groupID;
+}
+
 uint16_t __MirrorBuddyGroupMapper_getBuddyGroupIDUnlocked(MirrorBuddyGroupMapper* this,
    uint16_t targetID)
 {

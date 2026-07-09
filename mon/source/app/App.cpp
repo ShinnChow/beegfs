@@ -59,7 +59,7 @@ void App::runNormal()
    Logger::createLogger(cfg->getLogLevel(), cfg->getLogType(), cfg->getLogNoDate(),
          cfg->getLogStdFile(), cfg->getLogNumLines(), cfg->getLogNumRotatedFiles());
 
-   pidFileLockFD = createAndLockPIDFile(cfg->getPIDFile());
+   pidFileLockFD = createAndLockPIDFile(cfg->getPidFile());
    initDataObjects();
    SignalHandler::registerSignalHandler(this);
    initLocalNodeInfo();
@@ -151,7 +151,7 @@ void App::initDataObjects()
       InfluxDB::Config influxdbConfig;
       influxdbConfig.host = cfg->getDbHostName();
       influxdbConfig.port = cfg->getDbHostPort();
-      influxdbConfig.maxPointsPerRequest = cfg->getInfluxdbMaxPointsPerRequest();
+      influxdbConfig.maxPointsPerRequest = cfg->getDbMaxPointsPerRequest();
       influxdbConfig.httpTimeout = cfg->getHttpTimeout();
       influxdbConfig.curlCheckSSLCertificates = cfg->getCurlCheckSSLCertificates();
       if (cfg->getDbType() == Config::DbTypes::INFLUXDB2)
@@ -164,8 +164,8 @@ void App::initDataObjects()
       else
       {
          influxdbConfig.database = cfg->getDbDatabase();
-         influxdbConfig.setRetentionPolicy = cfg->getInfluxDbSetRetentionPolicy();
-         influxdbConfig.retentionDuration = cfg->getInfluxDbRetentionDuration();
+         influxdbConfig.setRetentionPolicy = cfg->getDbSetRetentionPolicy();
+         influxdbConfig.retentionDuration = cfg->getDbRetentionDuration();
          influxdbConfig.username = cfg->getDbAuthUsername();
          influxdbConfig.password = cfg->getDbAuthPassword();
          influxdbConfig.dbVersion = INFLUXDB;

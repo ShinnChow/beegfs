@@ -4,6 +4,9 @@
 #include <common/Common.h>
 
 #include <linux/parser.h>
+#ifdef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+#include <linux/fs_parser.h>
+#endif
 
 
 enum {
@@ -32,6 +35,7 @@ enum {
 };
 
 
+
 static match_table_t fhgfs_mount_option_tokens =
 {
    /* Mount options that take string arguments */
@@ -57,7 +61,128 @@ static match_table_t fhgfs_mount_option_tokens =
    { Opt_err, NULL }
 };
 
+#ifdef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+/*
+ * Use the new mount API parser directly instead of translating back through
+ * the legacy match_token() table. The duplicate option description is
+ * intentional while both kernel mount API paths are supported:
+ * fs_parameter_spec/fs_parse() defines the structured new-API path, and
+ * fhgfs_mount_option_tokens remains only for kernels that still use the old
+ * raw option string path. Once support
+ * for those kernels is dropped, the legacy table and parser can be removed
+ * without rewriting this new-API parser.
+ */
+static const struct fs_parameter_spec fhgfs_mount_parameters[] =
+{
+   fsparam_string_empty("cfgFile", Opt_cfgFile),
+   fsparam_string_empty("logStdFile", Opt_logStdFile),
+   fsparam_string_empty("sysMgmtdHost", Opt_sysMgmtdHost),
+   fsparam_string_empty("tunePreferredMetaFile", Opt_tunePreferredMetaFile),
+   fsparam_string_empty("tunePreferredStorageFile", Opt_tunePreferredStorageFile),
 
+   fsparam_string_empty("connInterfacesList", Opt_connInterfacesList),
+   fsparam_string_empty("connAuthFile", Opt_connAuthFile),
+   fsparam_string_empty("connDisableAuthentication", Opt_connDisableAuthentication),
+   fsparam_string_empty("connDisableIPv6", Opt_connDisableIPv6),
+
+   fsparam_s32("logLevel", Opt_logLevel),
+   fsparam_u32("connPortShift", Opt_connPortShift),
+   fsparam_u32("connMgmtdPort", Opt_connMgmtdPort),
+   fsparam_u32("sysMountSanityCheckMS", Opt_sysMountSanityCheckMS),
+
+   fsparam_flag("grpid", Opt_grpid),
+   {}
+};
+#endif
+
+
+
+#ifdef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+static int MountConfig_setStringParam(char** field, struct fs_parameter* param)
+{
+   if(!param->string)
+      return -ENOMEM;
+
+   SAFE_KFREE(*field);
+   *field = param->string;
+   param->string = NULL;
+   return 0;
+}
+
+int MountConfig_parseParam(MountConfig* this, struct fs_context* fc, struct fs_parameter* param)
+{
+   struct fs_parse_result result;
+   int tokenID;
+
+   tokenID = fs_parse(fc, fhgfs_mount_parameters, param, &result);
+   if(tokenID < 0)
+      return tokenID;
+
+#ifdef BEEGFS_DEBUG
+   if(param->string)
+      printk_fhgfs(KERN_INFO, "Mount option = '%s=%s'\n", param->key, param->string);
+   else
+      printk_fhgfs(KERN_INFO, "Mount option = '%s'\n", param->key);
+#endif
+
+   switch(tokenID)
+   {
+      case Opt_cfgFile:
+         return MountConfig_setStringParam(&this->cfgFile, param);
+
+      case Opt_logStdFile:
+         return MountConfig_setStringParam(&this->logStdFile, param);
+
+      case Opt_sysMgmtdHost:
+         return MountConfig_setStringParam(&this->sysMgmtdHost, param);
+
+      case Opt_tunePreferredMetaFile:
+         return MountConfig_setStringParam(&this->tunePreferredMetaFile, param);
+
+      case Opt_tunePreferredStorageFile:
+         return MountConfig_setStringParam(&this->tunePreferredStorageFile, param);
+
+      case Opt_connInterfacesList:
+         return MountConfig_setStringParam(&this->connInterfacesList, param);
+
+      case Opt_connAuthFile:
+         return MountConfig_setStringParam(&this->connAuthFile, param);
+
+      case Opt_connDisableAuthentication:
+         return MountConfig_setStringParam(&this->connDisableAuthentication, param);
+
+      case Opt_connDisableIPv6:
+         return MountConfig_setStringParam(&this->connDisableIPv6, param);
+
+      case Opt_logLevel:
+         this->logLevel = result.int_32;
+         this->logLevelDefined = true;
+         return 0;
+
+      case Opt_connPortShift:
+         this->connPortShift = result.uint_32;
+         this->connPortShiftDefined = true;
+         return 0;
+
+      case Opt_connMgmtdPort:
+         this->connMgmtdPort = result.uint_32;
+         this->connMgmtdPortDefined = true;
+         return 0;
+
+      case Opt_sysMountSanityCheckMS:
+         this->sysMountSanityCheckMS = result.uint_32;
+         this->sysMountSanityCheckMSDefined = true;
+         return 0;
+
+      case Opt_grpid:
+         this->grpid = true;
+         return 0;
+
+      default:
+         return invalf(fc, "beegfs: Unknown mount option '%s'", param->key);
+   }
+}
+#endif
 
 bool MountConfig_parseFromRawOptions(MountConfig* this, char* mountOptions)
 {

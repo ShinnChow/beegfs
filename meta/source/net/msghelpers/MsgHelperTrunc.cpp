@@ -2,6 +2,7 @@
 #include <common/net/message/storage/TruncLocalFileRespMsg.h>
 #include <components/worker/TruncChunkFileWork.h>
 #include <program/Program.h>
+#include <components/InvalWatch.h>
 #include "MsgHelperTrunc.h"
 
 #include <boost/lexical_cast.hpp>
@@ -27,6 +28,10 @@ FhgfsOpsErr MsgHelperTrunc::truncFile(EntryInfo* entryInfo, int64_t filesize, bo
    inode->updateInodeOnDisk(entryInfo);
 
    metaStore->releaseFile(entryInfo->getParentEntryID(), inode);
+
+   // Trigger remote cache invalidation
+   if (localRes == FhgfsOpsErr_SUCCESS)
+      invalidate_target_by_entryid(entryInfo->getEntryID());
 
    return localRes;
 }

@@ -104,7 +104,7 @@ class App : public AbstractApp
          }
       }
 
-      virtual ICommonConfig* getCommonConfig() const override
+      virtual CommonConfig const* getCommonConfig() const override
       {
          return cfg.get();
       }

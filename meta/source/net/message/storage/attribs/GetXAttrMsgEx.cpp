@@ -1,6 +1,8 @@
 #include <program/Program.h>
 #include <common/net/message/storage/attribs/GetXAttrRespMsg.h>
 #include <net/msghelpers/MsgHelperXAttr.h>
+#include <components/InvalWatchClient.h>
+
 #include "GetXAttrMsgEx.h"
 
 bool GetXAttrMsgEx::processIncoming(ResponseContext& ctx)
@@ -38,7 +40,7 @@ std::unique_ptr<MirroredMessageResponseState> GetXAttrMsgEx::executeLocally(Resp
       getXAttrRes = FhgfsOpsErr_NOTSUPP;
       goto resp;
    }
-
+   add_target_watch_for_connected_watcher(ctx, entryInfo);
    // Clamp buffer size to the maximum the NetMsg can handle, plus one byte in the (unlikely) case
    // the on-disk metadata is larger than that.
    if (size > MsgHelperXAttr::MAX_VALUE_SIZE)

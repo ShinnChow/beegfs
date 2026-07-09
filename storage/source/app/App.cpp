@@ -474,7 +474,7 @@ void App::initLocalNodeNumIDFile(NumNodeID localNodeNumID)
  */
 void App::preinitStorage()
 {
-   this->pidFileLockFD = createAndLockPIDFile(cfg->getPIDFile() ); // ignored if pidFile not defined
+   this->pidFileLockFD = createAndLockPIDFile(cfg->getPidFile() ); // ignored if pidFile not defined
 
    if (cfg->getStorageDirectories().empty())
       throw InvalidConfigException("No storage target directories defined");
@@ -1507,7 +1507,7 @@ void App::checkTargetsUUIDs()
    if (!cfg->getStoreFsUUID().empty())
    {
       std::list<Path> paths = cfg->getStorageDirectories();
-      std::list<std::string> uuid_strs = cfg->getStoreFsUUID();
+      std::list<std::string> uuid_strs = cfg->getStoreFsUUIDs();
 
       if (paths.size() != uuid_strs.size()) {
          throw InvalidConfigException("Storage path list and storage UUID list have different sizes");

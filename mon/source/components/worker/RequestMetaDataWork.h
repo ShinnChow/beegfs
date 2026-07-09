@@ -16,6 +16,7 @@ class RequestMetaDataWork : public Work
          std::shared_ptr<MetaNodeEx> node;
          MetaNodeDataContent data;
          HighResStatsList highResStatsList;
+         StorageTargetInfoList metaTargetList;
          ClientOpsRequestor::IdOpsUnorderedMap ipOpsUnorderedMap;
          ClientOpsRequestor::IdOpsUnorderedMap userOpsUnorderedMap;
       };

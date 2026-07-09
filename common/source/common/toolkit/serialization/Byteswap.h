@@ -67,9 +67,9 @@ inline uint128_t byteswap128(uint128_t u)
 #define LE_TO_HOST_32(value)    HOST_TO_LE_32(value)
 #define LE_TO_HOST_64(value)    HOST_TO_LE_64(value)
 #define LE_TO_HOST_128(value)   HOST_TO_LE_128(value)
-#define BE_TO_HOST_16(value)    HOST_TO_LE_16(value)
-#define BE_TO_HOST_32(value)    HOST_TO_LE_32(value)
-#define BE_TO_HOST_64(value)    HOST_TO_LE_64(value)
-#define BE_TO_HOST_128(value)   HOST_TO_LE_128(value)
+#define BE_TO_HOST_16(value)    HOST_TO_BE_16(value)
+#define BE_TO_HOST_32(value)    HOST_TO_BE_32(value)
+#define BE_TO_HOST_64(value)    HOST_TO_BE_64(value)
+#define BE_TO_HOST_128(value)   HOST_TO_BE_128(value)
 
 

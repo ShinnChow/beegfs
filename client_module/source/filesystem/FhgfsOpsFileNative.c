@@ -1,6 +1,7 @@
 #include <app/App.h>
 #include <app/log/Logger.h>
 #include <linux/pagemap.h>
+#include <common/Common.h>
 #include "FhgfsOpsFileNative.h"
 #include "FhgfsOpsFile.h"
 #include "FhgfsOpsHelper.h"
@@ -874,7 +875,7 @@ static bool beegfs_wps_must_flush_before(struct beegfs_writepages_state* state, 
    if(state->nr_pages == writepages_block_size)
       return true;
 
-   if(state->pages[state->nr_pages - 1]->index + 1 != next->index)
+   if (page_index(state->pages[state->nr_pages - 1]) + 1 != page_index(next))
       return true;
 
    if(pvr_present(next) )
@@ -892,14 +893,35 @@ static bool beegfs_wps_must_flush_before(struct beegfs_writepages_state* state, 
    return false;
 }
 
+static int beegfs_writepages_callback_page(struct page* page, struct writeback_control* wbc,
+   void* data);
+
 #ifdef KERNEL_WRITEPAGE_HAS_FOLIO
 static int beegfs_writepages_callback(struct folio *folio, struct writeback_control* wbc, void* data)
 {
-    struct page *page = &folio->page;
+   unsigned long nr_pages = folio_nr_pages(folio);
+
+   /*
+    * The writeback path is still page-based. Order-0 folios map cleanly to the
+    * existing page callback through the folio head page. Large folios are not
+    * enabled for this mapping today; enabling them with mapping_set_large_folios()
+    * in the inode setup is future work. If larger folios ever reach this callback,
+    * it must split the folio into per-page ranges before queuing writeback, and
+    * completion must use the matching folio-aware dirty/writeback/unlock helpers.
+    */
+
+   WARN_ONCE(nr_pages > 1, "beegfs: multi-page folio in %s index=%lu nr_pages=%lu\n",
+      __func__, folio->index, nr_pages);
+
+   return beegfs_writepages_callback_page(&folio->page, wbc, data);
+}
 #else
-static int beegfs_writepages_callback(struct page* page, struct writeback_control* wbc, void* data)
-{
+#define beegfs_writepages_callback beegfs_writepages_callback_page
 #endif
+
+static int beegfs_writepages_callback_page(struct page* page, struct writeback_control* wbc,
+   void* data)
+{
    struct beegfs_writepages_context* context = data;
    struct beegfs_writepages_state* state = context->currentState;
 
@@ -938,7 +960,7 @@ static int beegfs_do_write_pages(struct address_space* mapping, struct writeback
    };
 
    FhgfsOpsHelper_logOpDebug(app, NULL, inode, __func__, "page? %i %lu", page != NULL,
-      page ? page->index : 0);
+      page ? page_index(page) : 0);
    IGNORE_UNUSED_VARIABLE(app);
 
    referenceRes = FhgfsInode_referenceHandle(BEEGFS_INODE(inode), NULL, OPENFILE_ACCESS_READWRITE,
@@ -956,12 +978,7 @@ static int beegfs_do_write_pages(struct address_space* mapping, struct writeback
 
    if(page)
    {
-      #ifdef KERNEL_WRITEPAGE_HAS_FOLIO
-          struct folio *folio = page_folio(page);
-          err = beegfs_writepages_callback(folio, wbc, &context);
-      #else
-          err = beegfs_writepages_callback(page, wbc, &context);
-      #endif
+      err = beegfs_writepages_callback_page(page, wbc, &context);
 
       //XXX not sure if it's supposed to be like that
       WARN_ON(wbc->nr_to_write != 1);
@@ -969,7 +986,11 @@ static int beegfs_do_write_pages(struct address_space* mapping, struct writeback
          -- wbc->nr_to_write;
    }
    else
-      err = write_cache_pages(mapping, wbc, beegfs_writepages_callback, &context);
+      #if defined(KERNEL_WRITEPAGE_HAS_FOLIO) && defined(KERNEL_HAS_WRITEBACK_ITER)
+      err = beegfs_write_cache_folio(mapping, wbc, beegfs_writepages_callback, &context);
+      #else
+      err = beegfs_write_cache_pages(mapping, wbc, beegfs_writepages_callback, &context);
+      #endif
 
    beegfs_writepages_submit(&context);
 
@@ -983,6 +1004,7 @@ static int beegfs_do_write_pages(struct address_space* mapping, struct writeback
    return err;
 }
 
+#ifndef KERNEL_WRITE_BEGIN_USES_FOLIO
 static int beegfs_writepage(struct page* page, struct writeback_control* wbc)
 {
    struct inode* inode = page->mapping->host;
@@ -993,6 +1015,7 @@ static int beegfs_writepage(struct page* page, struct writeback_control* wbc)
 
    return beegfs_do_write_pages(page->mapping, wbc, page, true);
 }
+#endif
 
 static int beegfs_writepages(struct address_space* mapping, struct writeback_control* wbc)
 {
@@ -1272,7 +1295,8 @@ static int beegfs_readpages_add_page(void* data, struct page* page)
    bool mustFlush;
 
    mustFlush = (state->nr_pages == readpages_block_size)
-      || (state->nr_pages > 0 && state->pages[state->nr_pages - 1]->index + 1 != page->index);
+      || (state->nr_pages > 0 && page_index(state->pages[state->nr_pages - 1]) + 1 !=
+         page_index(page));
 
    if(mustFlush)
    {
@@ -1304,6 +1328,11 @@ static int beegfs_readpages(struct file* filp, struct address_space* mapping,
    struct inode* inode = ractl->mapping->host;
    struct file* filp = ractl->file;
    struct page* page_ra;
+#ifndef KERNEL_HAS_READAHEAD_PAGE
+   struct folio *folio = NULL;
+   unsigned int nr_pages = 0;
+   unsigned int page_idx = 0;
+#endif
 #else
    struct inode* inode = mapping->host;
 #endif
@@ -1346,18 +1375,41 @@ static int beegfs_readpages(struct file* filp, struct address_space* mapping,
 
    FsFileInfo_getIOInfo(fileInfo, fhgfsInode, &ioInfo);
 
-   #ifdef KERNEL_HAS_FOLIO
+#ifdef KERNEL_HAS_FOLIO
    if (readahead_count(ractl))
    {
+#ifdef KERNEL_HAS_READAHEAD_PAGE
+      /* readahead_page() returns a page reference that must be released here. */
       while ((page_ra = readahead_page(ractl)) != NULL)
       {
          err = beegfs_readpages_add_page(context, page_ra);
          put_page(page_ra);
+
          if (err)
             goto out;
       }
+#else
+      /*
+       * readahead_folio() drops the folio reference before returning it.
+       * The read path still owns completion/unlock, but not an extra ref.
+       */
+      while ((folio = readahead_folio(ractl)) != NULL)
+      {
+         nr_pages = folio_nr_pages(folio);
+         for (page_idx = 0; page_idx < nr_pages; page_idx++)
+         {
+            page_ra = folio_page(folio, page_idx);
+            err = beegfs_readpages_add_page(context, page_ra);
+            if (err)
+               break;
+         }
+
+         if (err)
+            goto out;
+      }
+#endif
    }
-   #else
+#else
    err = read_cache_pages(mapping, pages, beegfs_readpages_add_page, context);
    #endif
 
@@ -1442,13 +1494,22 @@ out:
    return result;
 }
 
-static int beegfs_write_begin(struct file *filp, struct address_space *mapping,
+static int beegfs_write_begin(
+#ifdef KERNEL_WRITE_BEGIN_HAS_KIOCB
+    const struct kiocb *iocb,
+#else
+    struct file *filp,
+#endif
+    struct address_space *mapping,
     loff_t pos, unsigned len,
 #if BEEGFS_HAS_WRITE_FLAGS
     unsigned flags,
 #endif
     beegfs_pgfol_t *pgfolp, void **fsdata)
 {
+#ifdef KERNEL_WRITE_BEGIN_HAS_KIOCB
+   struct file *filp = iocb->ki_filp;
+#endif
    pgoff_t index = pos >> PAGE_SHIFT;
 
    struct page *page = beegfs_grab_cache_page(mapping, index,
@@ -1468,9 +1529,18 @@ static int beegfs_write_begin(struct file *filp, struct address_space *mapping,
 
 }
 
-static int beegfs_write_end(struct file *filp, struct address_space *mapping, loff_t pos,
+static int beegfs_write_end(
+#ifdef KERNEL_WRITE_END_HAS_KIOCB
+    const struct kiocb *iocb,
+#else
+    struct file *filp,
+#endif
+    struct address_space *mapping, loff_t pos,
     unsigned len, unsigned copied, beegfs_pgfol_t pgfol, void *fsdata)
 {
+#ifdef KERNEL_WRITE_END_HAS_KIOCB
+    struct file *filp = iocb->ki_filp;
+#endif
     struct page *page = beegfs_get_page(pgfol);
     return __beegfs_write_end(filp, pos, len, copied, page);
 }
@@ -1698,7 +1768,9 @@ const struct address_space_operations fhgfs_addrspace_native_ops = {
    .releasepage = beegfs_releasepage,
 #endif
 
+#ifndef KERNEL_WRITE_BEGIN_USES_FOLIO
    .writepage = beegfs_writepage,
+#endif
    .direct_IO = beegfs_direct_IO,
 
 #ifdef KERNEL_HAS_FOLIO

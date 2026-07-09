@@ -2,6 +2,8 @@
 #define TS_DATABASE_H_
 
 #include <common/nodes/NodeType.h>
+#include <common/net/message/mon/RequestMetaDataRespMsg.h>
+#include <common/storage/StorageTargetInfo.h>
 #include <nodes/MetaNodeEx.h>
 #include <nodes/StorageNodeEx.h>
 #include <app/Config.h>
@@ -24,9 +26,14 @@ class TSDatabase
             std::shared_ptr<Node> node, const HighResolutionStats& data) = 0;
       virtual void insertStorageTargetsData(
             std::shared_ptr<Node> node, const StorageTargetInfo& data) = 0;
+      virtual void insertMetaTargetsData(
+            std::shared_ptr<Node> node, const StorageTargetInfo& data) = 0;
       virtual void insertClientNodeData(
             const std::string& id, const NodeType nodeType,
             const std::map<std::string, uint64_t>& opMap, bool perUser) = 0;
+      virtual void insertPerClientInvalWatchData(
+            std::shared_ptr<Node> node,
+            const InvalWatcherStat& entry) = 0;
 
       virtual void write() = 0;
 };

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 function addDashboard() {
-   echo -e "{\"dashboard\": $(cat $1) }" | \
+   printf '{"dashboard": %s }' "$(cat "$1")" | \
    sed -e "s,\${DS_BEEGFS_MON_INFLUXDB},$DATASOURCE_NAME,g" | \
    curl -s -X POST "$HOST/api/dashboards/db"  \
       --header "Content-type: application/json" \
@@ -108,6 +108,7 @@ if [[ "$influxdb_version" == "1" ]] && [[ "$monType" == "wtelegraf" ]] ; then
     addDashboard "$GRAFANA_DIR/storage_targets_telegraf_influxdbv1.json"
     addDashboard "$GRAFANA_DIR/client_ops_node_telegraf_influxdbv1.json"
     addDashboard "$GRAFANA_DIR/client_ops_user_telegraf_influxdbv1.json"
+    addDashboard "$GRAFANA_DIR/meta_invalwatch_influxdbv1.json"
 
 elif [[ "$influxdb_version" == "2" ]] && [[ "$monType" == "wtelegraf" ]] ; then
 
@@ -118,6 +119,7 @@ elif [[ "$influxdb_version" == "2" ]] && [[ "$monType" == "wtelegraf" ]] ; then
     addDashboard "$GRAFANA_DIR/storage_targets_telegraf_influxdbv2.json"
     addDashboard "$GRAFANA_DIR/client_ops_node_telegraf_influxdbv2.json"
     addDashboard "$GRAFANA_DIR/client_ops_user_telegraf_influxdbv2.json"
+    addDashboard "$GRAFANA_DIR/meta_invalwatch_influxdbv2.json"
 
 elif [[ "$influxdb_version" == "1" ]] && [[ "$monType" == "wotelegraf" ]] ; then
 
@@ -128,6 +130,7 @@ elif [[ "$influxdb_version" == "1" ]] && [[ "$monType" == "wotelegraf" ]] ; then
     addDashboard "$GRAFANA_DIR/storage_targets_influxdbv1.json"
     addDashboard "$GRAFANA_DIR/client_ops_node_influxdbv1.json"
     addDashboard "$GRAFANA_DIR/client_ops_user_influxdbv1.json"
+    addDashboard "$GRAFANA_DIR/meta_invalwatch_influxdbv1.json"
 
 elif [[ "$influxdb_version" == "2" ]] && [[ "$monType" == "wotelegraf" ]] ; then
 
@@ -138,6 +141,7 @@ elif [[ "$influxdb_version" == "2" ]] && [[ "$monType" == "wotelegraf" ]] ; then
     addDashboard "$GRAFANA_DIR/storage_targets_influxdbv2.json"
     addDashboard "$GRAFANA_DIR/client_ops_node_influxdbv2.json"
     addDashboard "$GRAFANA_DIR/client_ops_user_influxdbv2.json"
+    addDashboard "$GRAFANA_DIR/meta_invalwatch_influxdbv2.json"
 
 else
    echo "*** Please select correct version of InfluxDB ***"

@@ -46,11 +46,7 @@ extern loff_t FhgfsOps_llseek(struct file *file, loff_t offset, int origin);
 extern int FhgfsOps_opendirIncremental(struct inode* inode, struct file* file);
 extern int FhgfsOps_releasedir(struct inode* inode, struct file* file);
 
-#ifdef KERNEL_HAS_ITERATE_DIR
 extern int FhgfsOps_iterateIncremental(struct file* file, struct dir_context* ctx);
-#else
-extern int FhgfsOps_readdirIncremental(struct file* file, void* buf, filldir_t filldir);
-#endif // LINUX_VERSION_CODE
 
 extern int FhgfsOps_open(struct inode* inode, struct file* file);
 extern int FhgfsOps_openReferenceHandle(App* app, struct inode* inode, struct file* file,
@@ -194,7 +190,16 @@ static inline struct page* beegfs_grab_cache_page(struct address_space* mapping,
                                                   pgoff_t index,
                                                   unsigned flags)
 {
-#ifdef KERNEL_WRITE_BEGIN_HAS_FLAGS
+#if defined(KERNEL_WRITE_BEGIN_USES_FOLIO)
+    /*
+     * pagecache_get_page(..., FGP_WRITEBEGIN, ...) remains a compatible
+     * page-based path here. Moving to write_begin_get_folio() would require
+     * plumbing both iocb and len down to this helper.
+     * XXX: TODO?
+     */
+    IGNORE_UNUSED_VARIABLE(flags);
+    return pagecache_get_page(mapping, index, FGP_WRITEBEGIN, mapping_gfp_mask(mapping));
+#elif defined(KERNEL_WRITE_BEGIN_HAS_FLAGS)
     return grab_cache_page_write_begin(mapping, index, flags);
 #else
     IGNORE_UNUSED_VARIABLE(flags);

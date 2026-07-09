@@ -1,4 +1,4 @@
-#include <common/app/config/ICommonConfig.h>
+#include <common/app/config/CommonConfig.h>
 #include <common/app/log/LogContext.h>
 #include <common/app/AbstractApp.h>
 #include "PeerInfoMsgEx.h"

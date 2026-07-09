@@ -1859,11 +1859,12 @@ static PMQ_Read_Result pmq_bsearch_msg(PMQ_Reader *reader, MSN msn, CSN csn_lo, 
 
    PMQ_Chunks_Readstate *ckread = &reader->chunks_readstate;
 
+   PMQ_Chunk_Hdr hdr = {};
+   CSN hdr_csn = {};
    bool hdr_valid = false;
-   PMQ_Chunk_Hdr hdr;
-   CSN hdr_csn;
 
-   for (;;)
+   // Binary search over chunks from csn_lo to csn_hi (right-exclusive).
+   while (csn_lo != csn_hi)
    {
       CSN csn = csn_lo + (csn_hi - csn_lo) / 2;
 
@@ -1871,15 +1872,7 @@ static PMQ_Read_Result pmq_bsearch_msg(PMQ_Reader *reader, MSN msn, CSN csn_lo, 
 
       if (readres == PMQ_Read_Result_Out_Of_Bounds)
       {
-         // Assuming that csn_lo was valid when we were called,
-         // we now have a situation where the chunk was concurrently discarded.
-         if (csn == csn_lo)
-         {
-            // Already at the final recursion (csn_lo + 1 == csn_hi). Search
-            // space is now empty.
-            return PMQ_Read_Result_Out_Of_Bounds;
-         }
-         // shrink the search space, adapt lower boundary to account for the concurrently discarded data.
+         // Chunk was concurrently discarded.
          csn_lo = csn + 1;
       }
       else if (readres == PMQ_Read_Result_EOF)
@@ -1894,49 +1887,42 @@ static PMQ_Read_Result pmq_bsearch_msg(PMQ_Reader *reader, MSN msn, CSN csn_lo, 
       }
       else
       {
-         if (hdr_valid)
+         // Perform chunk integrity check
          {
             PMQ_Chunk_Hdr old_hdr = hdr;
-            CSN old_csn = hdr_csn;
+            CSN old_hdr_csn = hdr_csn;
+            bool old_hdr_valid = hdr_valid;
 
-            pmq_reader_copy_chunk_header(ckread, &hdr);
-            hdr_csn = csn;
-
-            if (! pmq_check_chunk_msns(csn, old_csn, &hdr, &old_hdr))
-            {
-               return PMQ_Read_Result_Integrity_Error;
-            }
-         }
-         else
-         {
             pmq_reader_copy_chunk_header(ckread, &hdr);
             hdr_csn = csn;
             hdr_valid = true;
-         }
 
-         PMQ_Chunks_Readstate *ckread = &reader->chunks_readstate;
+            if (old_hdr_valid)
+            {
+               if (! pmq_check_chunk_msns(hdr_csn, old_hdr_csn, &hdr, &old_hdr))
+               {
+                  return PMQ_Read_Result_Integrity_Error;
+               }
+            }
+         }
 
          if (sn64_lt(msn, ckread->cnk_msn))
          {
-            if (csn == csn_lo)
-               // already final iteration
-               return PMQ_Read_Result_Out_Of_Bounds;
             csn_hi = csn;
          }
          else if (sn64_ge(msn, ckread->cnk_msn + ckread->cnk_msgcount))
          {
-            if (csn == csn_lo)
-               // already final iteration
-               return PMQ_Read_Result_Out_Of_Bounds;
             csn_lo = csn + 1;
          }
          else
          {
-            // message inside this block.
+            // Message found in this block.
             return PMQ_Read_Result_Success;
          }
       }
    }
+   // Message not found in given range.
+   return PMQ_Read_Result_Out_Of_Bounds;
 }
 
 static PMQ_Read_Result pmq_reader_seek_to_msg_chunkstore(PMQ_Reader *reader, MSN msn)
@@ -1953,7 +1939,7 @@ static PMQ_Read_Result pmq_reader_seek_to_msg_chunkstore(PMQ_Reader *reader, MSN
    }
 
    CSN csn_lo = pc.cks_discard_csn;
-   CSN csn_hi = pc.cks_csn - 1;
+   CSN csn_hi = pc.cks_csn;
 
    PMQ_Read_Result result = pmq_bsearch_msg(reader, msn, csn_lo, csn_hi);
 

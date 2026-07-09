@@ -6,6 +6,7 @@
 #include <common/net/message/storage/attribs/SetAttrRespMsg.h>
 #include <common/toolkit/MessagingTk.h>
 #include <components/FileEventLogger.h>
+#include <components/InvalWatch.h>
 #include "HardlinkMsgEx.h"
 
 std::tuple<FileIDLock, ParentNameLock, ParentNameLock, FileIDLock> HardlinkMsgEx::lock(
@@ -222,11 +223,17 @@ std::unique_ptr<MirroredMessageResponseState> HardlinkMsgEx::executeLocally(Resp
 
    metaStore->releaseDir(toDir->getID());
 
-   if (!isSecondary && retVal == FhgfsOpsErr_SUCCESS && app->getFileEventLogger() && getFileEvent())
+   if (!isSecondary && retVal == FhgfsOpsErr_SUCCESS)
    {
-      EventContext eventCtx = makeEventContext(getFromInfo(), getFromInfo()->getParentEntryID(),
-         getMsgHeaderUserID(), "", updatedLinkCount, isSecondary);
-      logEvent(app->getFileEventLogger(), *getFileEvent(), eventCtx);
+      if (app->getFileEventLogger() && getFileEvent())
+      {
+         EventContext eventCtx = makeEventContext(getFromInfo(), getFromInfo()->getParentEntryID(),
+            getMsgHeaderUserID(), "", updatedLinkCount, isSecondary);
+         logEvent(app->getFileEventLogger(), *getFileEvent(), eventCtx);
+      }
+
+      // Trigger remote cache invalidation (nlink changed)
+      invalidate_target_by_entryid(getFromInfo()->getEntryID());
    }
 
    return boost::make_unique<ResponseState>(retVal);

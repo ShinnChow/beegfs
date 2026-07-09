@@ -232,7 +232,6 @@ $(call define_if_matches, KERNEL_HAS_DENTRY_PATH_RAW, "dentry_path_raw", dcache.
 $(call define_if_matches, KERNEL_HAS_FSYNC_DENTRY, -P "(\*fsync).*dentry", fs.h)
 $(call define_if_matches, KERNEL_HAS_ITER_FILE_SPLICE_WRITE, "iter_file_splice_write", fs.h)
 $(call define_if_matches, KERNEL_HAS_ITER_GENERIC_FILE_SENDFILE, "generic_file_sendfile", fs.h)
-$(call define_if_matches, KERNEL_HAS_ITERATE_DIR, "iterate_dir", fs.h)
 $(call define_if_matches, KERNEL_HAS_ENCODE_FH_INODE, -P "\(\*encode_fh\).struct inode", exportfs.h)
 $(call define_if_matches, KERNEL_HAS_D_DELETE_CONST_ARG, \
    -F "int (*d_delete)(const struct dentry *);", dcache.h)
@@ -260,7 +259,6 @@ KERNEL_FEATURE_DETECTION += $(shell \
    grep -sFA5 "kmem_cache_create" ${KSRCDIR_PRUNED_HEAD}/include/linux/slab.h \
       | grep -qsxP "\s+void \(\*\)\(.*?\)," \
       && echo "-DKERNEL_HAS_KMEMCACHE_DTOR")
-$(call define_if_matches, KERNEL_HAS_SB_BDI, -F "struct backing_dev_info *s_bdi", fs.h)
 $(call define_if_matches, KERNEL_HAS_BDI_SETUP_AND_REGISTER, "bdi_setup_and_register", \
    backing-dev.h)
 $(call define_if_matches, KERNEL_HAS_FOLLOW_LINK_COOKIE, \

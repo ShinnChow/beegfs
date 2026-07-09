@@ -6,6 +6,7 @@
 
 #include <common/storage/striping/Raid0Pattern.h>
 #include <common/toolkit/FsckTk.h>
+#include <components/InvalWatch.h>
 #include <net/msghelpers/MsgHelperStat.h>
 #include <net/msghelpers/MsgHelperMkFile.h>
 #include <program/Program.h>
@@ -169,6 +170,11 @@ FhgfsOpsErr MetaStore::unlinkOverwrittenEntryUnlocked(DirInode& parentDir,
       unlinkRes = unlinkDentryAndInodeUnlocked("", parentDir, overWrittenEntry,
          DirEntry_UNLINK_ID, outInode, outNumHardlinks);
    }
+
+
+   // Notify InvalWatch watchers of the overwritten file's entryID 
+   if (unlinkRes == FhgfsOpsErr_SUCCESS || unlinkRes == FhgfsOpsErr_INUSE)
+      invalidate_target_by_entryid(overWrittenEntry->getEntryID());
 
    return unlinkRes;
 }

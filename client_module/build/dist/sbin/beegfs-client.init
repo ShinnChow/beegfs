@@ -14,8 +14,8 @@ set -e
 # Provides:          beegfs-client
 # Required-Start:
 # Required-Stop:
-# Should-Start:      $network $local_fs $syslog $time beegfs-helperd beegfs-mgmtd beegfs-meta beegfs-storage openib openibd rdma opensmd opensm $named slapd autofs ypbind nscd nslcd sshd
-# Should-Stop:       $network $local_fs $syslog $time beegfs-helperd beegfs-mgmtd beegfs-meta beegfs-storage openib openibd rdma opensmd opensm $named slapd autofs ypbind nscd nslcd sshd
+# Should-Start:      $network $local_fs $syslog $time beegfs-mgmtd beegfs-meta beegfs-storage openib openibd rdma opensmd opensm $named slapd autofs ypbind nscd nslcd sshd
+# Should-Stop:       $network $local_fs $syslog $time beegfs-mgmtd beegfs-meta beegfs-storage openib openibd rdma opensmd opensm $named slapd autofs ypbind nscd nslcd sshd
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # chkconfig:         35 99 5
@@ -74,7 +74,7 @@ handle_selinux()
 
    # SELinux is now supported with BeeGFS if properly configured:
    # - /etc/beegfs/beegfs-meta.conf: storeClientXAttrs = true
-   # - /etc/beegfs/beegfs-client.conf: sysSelinuxEnabled = true
+   # - /etc/beegfs/beegfs-client.conf: sysSELinuxEnabled = true
 
    SELINUX_OPT="fscontext=system_u:object_r:fs_t:s0"
 
@@ -82,7 +82,7 @@ handle_selinux()
    echo "WARNING: SELINUX IS ENABLED. BeeGFS requires proper configuration to work with SELinux."
    echo "         Ensure the following settings are applied:"
    echo "           - storeClientXAttrs = true (in beegfs-meta.conf)"
-   echo "           - sysSelinuxEnabled = true (in beegfs-client.conf)"
+   echo "           - sysSELinuxEnabled = true (in beegfs-client.conf)"
    echo
 }
 

@@ -2,6 +2,8 @@
 #define FHGFSPAGE_H_
 
 #include <linux/fs.h>
+#include <linux/mm.h>
+#include <linux/pagemap.h>
 
 
 struct FhgfsPage;
@@ -71,7 +73,7 @@ void FhgfsPage_zeroPage(FhgfsPage* this)
  */
 pgoff_t FhgfsPage_getPageIndex(FhgfsPage* this)
 {
-   return this->page->index;
+   return page_index(this->page);
 }
 
 #endif // FHGFSPAGE_H_

@@ -58,7 +58,7 @@ class Destnet
 
       Destnet(const IPNetwork& net) : net(net) {}
 
-      BEEGFS_NODISCARD const IPNetwork& getNet() const
+      [[nodiscard]] const IPNetwork& getNet() const
       {
          return net;
       }
@@ -68,24 +68,24 @@ class Destnet
          sources.insert(a);
       }
 
-      BEEGFS_NODISCARD const std::set<IPAddress>& getSources() const
+      [[nodiscard]] const std::set<IPAddress>& getSources() const
       {
          return sources;
       }
 
       // match() indicates if the passed address is in "net"
-      BEEGFS_NODISCARD bool isInNetwork(const IPAddress& a) const
+      [[nodiscard]] bool isInNetwork(const IPAddress& a) const
       {
          return net.containsAddress(a);
       }
 
       // hasSource() indicates if the passed address is in "sources"
-      BEEGFS_NODISCARD bool hasSource(const IPAddress& addr) const
+      [[nodiscard]] bool hasSource(const IPAddress& addr) const
       {
          return sources.find(addr) != sources.end();
       }
 
-      BEEGFS_NODISCARD bool operator==(const Destnet& o) const
+      [[nodiscard]] bool operator==(const Destnet& o) const
       {
          return net == o.net &&
             sources == o.sources;

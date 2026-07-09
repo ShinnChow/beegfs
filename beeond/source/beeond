@@ -166,9 +166,6 @@ print_usage_and_exit()
    echo "         -E          => Enable TLS encryption between the mgmtmd and the command"
    echo "                        line configuration tool. Requires \"cert.pem\" and"
    echo "                        \"key.pem\" files in the configuration directory."
-   echo "         -H          => Enable enterprise features. This mode is required by all"
-   echo "                        other modes that enable enterprise features and requires a"
-   echo "                        \"license.pem\" file in the configuration directory."
    echo ""
    echo "   stop:"
    echo "      Stop the file system on a number of nodes, specified by the node file."
@@ -236,11 +233,38 @@ print_usage_and_exit()
    exit 1
 }
 
+print_license_warning_and_exit()
+{
+   echo "BeeOND requires a license to run and was unable to detect a valid community"
+   echo "or enterprise license."
+   echo ""
+   echo "If you already have a valid BeeOND community or enterprise license,"
+   echo "please place it in /etc/beeond/license.pem or the configuration directory"
+   echo "specified with -f. If both are present, the license in the configuration"
+   echo "path takes precedence."
+   echo ""
+   echo "If you need a license:"
+   echo "  * Enterprise licenses are available by contacting licensing@thinkparq.com."
+   echo "  * Community licenses are available free of charge but are limited to five"
+   echo "    nodes contributing storage to BeeOND"
+   echo ""
+   echo "A BeeOND community license can be generated under the following URL:"
+   echo ""
+   echo "https://www.beegfs.io/license/?beeond"
+   echo ""
+   echo "If you have any questions please reach out to licensing@thinkparq.com"
+   exit 3
+}
+
 ### internal functions for general usage ###
 print_error()
 {
-   echo "ERROR: ${1}" >&2
-   echo ""
+   if [ -t 2 ] ; then
+      echo -e "\e[31mERROR: ${1}\e[0m" >&2
+   else
+      echo "ERROR: ${1}" >&2
+   fi
+   echo "" >&2
 }
 
 print_error_and_exit()
@@ -293,6 +317,97 @@ check_pdsh()
       "if [ -e ${BEEOND_STOPLOCAL} ]; then true; else exit 2; fi" || \
       print_error_and_exit "Unable to find BeeOND helper program on one or more nodes.
 Please make sure BeeOND is installed on all machines."
+}
+
+# Extract the nth ($2) certificate from a cert chain in file ($1)
+extract_cert_from_chain() {
+   local FILE=$1
+   local WANT=$2
+   local COUNT=0
+   local PRINT=0
+   local LINE
+
+   while IFS= read -r LINE || [ -n "$LINE" ]; do
+      LINE=${LINE%"$(printf '\r')"}   # trim trailing CR if present
+      if [ "${LINE}" == "-----BEGIN CERTIFICATE-----" ] ; then
+         COUNT=$((COUNT + 1))
+         [ "${COUNT}" -eq "${WANT}" ] && PRINT=1
+      fi
+      [ "${PRINT}" -eq 1 ] && printf '%s\n' "${LINE}"
+      [ "${PRINT}" -eq 1 ] && [ "${LINE}" = "-----END CERTIFICATE-----" ] && return
+   done < "${FILE}"
+}
+
+# Check if the license certificate is valid for BeeOND.
+#
+# Relies on `openssl` to parse the certificate but will not fail if `openssl` is not installed.
+# Succeeds if the license has the scope "io.beegfs.scope.beeond" and allows at least as many
+# machines as will be used in the BeeOND instance.
+#
+# If enterprise features are enabled, also verifies their licenses.
+#
+# The purpose of this early check is to check license compliance early and fail early before setting
+# up BeeOND and running into enforcement errors on mgmtd.
+check_license()
+{
+   local FILE=$1
+   local FEATURES_LIC=""
+   local CERT_PEM=""
+
+   CERT_PEM=$(extract_cert_from_chain "${FILE}" 2)
+   if [ -z "${CERT_PEM}" ] ; then
+      print_error "Malformed license file. License file must contain a chain of two certificates"
+      exit 3
+   fi
+
+   if command -v openssl >/dev/null ; then
+      FEATURES_LIC=$(echo "${CERT_PEM}"\
+                  | openssl x509 -noout -text -ext subjectAltName 2>/dev/null\
+                  | grep -A1 "^X509v3 Subject Alternative Name:"\
+                  | tail -n1)
+   else
+      return 0
+   fi
+
+   if ! echo "${FEATURES_LIC}" | grep -qs "io\.beegfs\.scope\.beeond" ; then
+      print_error "License is not valid for BeeOND (missing \"io.beegfs.scope.beeond\")"
+      exit 3
+   fi
+
+   local NUM_MACHINES="${NUM_STORAGE_SERVER}"
+   if [ "${NUM_MACHINES}" -eq 0 ] || [ "${NUM_MACHINES}" -gt "${NODECOUNT}" ] ; then
+      NUM_MACHINES="${NODECOUNT}"
+   fi
+
+   local NUM_MACHINES_LIC=$(echo "${FEATURES_LIC}" | grep -o "io\.beegfs\.numservers\.\([0-9]\+\|unlimited\)")
+   NUM_MACHINES_LIC=${NUM_MACHINES_LIC#io.beegfs.numservers.}
+   # There shouldn't be any unlimited BeeOND licenses or BeeOND licenses that don't list a machine
+   # limit, but fall back to some working defaults just in case
+   if [ "${NUM_MACHINES_LIC}" == "unlimited" ] ; then
+      NUM_MACHINES_LIC=4294967295
+   elif ! [[ ${NUM_MACHINES_LIC} =~ ^[0-9]+$ ]] ; then
+      NUM_MACHINES_LIC=5
+   fi
+   if [ "${NUM_MACHINES_LIC}" -lt "${NUM_MACHINES}" ] ; then
+      print_error "License is only valid for ${NUM_MACHINES_LIC} nodes (${NUM_MACHINES} requested)"
+      exit 3
+   fi
+
+   if [ "${META_MIRROR}" == "true" ] || [ "${STORAGE_MIRROR}" == "true" ] ; then
+      if ! echo "${FEATURES_LIC}" | grep -qs "io\.beegfs\.mirroring" ; then
+         print_error "Enterprise Feature Mirroring not licensed"
+         exit 3
+      fi
+   fi
+
+   if [ -n "${TARGETFILE}" ] ; then
+      if ! echo "${FEATURES_LIC}" | grep -qs "io\.beegfs\.storagepool" ; then
+         print_error "Enterprise Feature Storage Pools not licensed"
+         exit 3
+      fi
+   fi
+
+   return 0
 }
 
 execute_ssh_cmd()
@@ -1251,21 +1366,12 @@ do_start()
             USE_TMPFS="true"
          ;;
          k)
-            if [[ -z ${LICENSE_FILE} ]] ; then
-               print_error_and_exit "To use mirroring, licensing (option -H) must be configured before the option -k"
-            fi
             STORAGE_MIRROR="true"
          ;;
          j)
-            if [[ -z ${LICENSE_FILE} ]] ; then
-               print_error_and_exit "To use mirroring, licensing (option -H) must be configured before the option -j"
-            fi
             META_MIRROR="true"
          ;;
          t)
-            if [[ -z ${LICENSE_FILE} ]] ; then
-               print_error_and_exit "To use storage pools, licensing (option -H) must be configured before the option -t"
-            fi
             TARGETFILE=${OPTARG}
          ;;
          T)
@@ -1287,21 +1393,32 @@ do_start()
             TLS_KEY_FILE="--tls-key-file ${CONFIGPATH}/key.pem"
          ;;
          H)
-            if ! [[ -f ${CONFIGPATH}/license.pem ]] ; then
-               print_error_and_exit "To use enterprise features, a config path (option -f) that contains a \"license.pem\" file and is available on all nodes needs to be specified before the option -H"
-            fi
-            LICENSE_FILE="--license-cert-file ${CONFIGPATH}/license.pem"
+            print_info "DEPRECATED: Parameter -H is deprecated. License files will be loaded from either <CONFIGPATH (-f)>/license.pem or /etc/beeond/license.pem"
          ;;
          \?)
-            echo "ERROR: invalid option: -${OPTARG}" >&2
+            print_error "invalid option: -${OPTARG}"
             print_usage_and_exit
          ;;
          :)
-            echo "ERROR: Option -${OPTARG} requires an argument" >&2
+            print_error "Option -${OPTARG} requires an argument"
             print_usage_and_exit
          ;;
       esac
    done
+
+   check_hostfile
+   NODECOUNT=$(grep -v '^$' ${HOSTFILE} | uniq | wc -l) #ignore empty lines
+   NODES=( $(grep -v '^$' ${HOSTFILE} | uniq) ) #store as array and ignore empty lines
+
+   if [ -n "${CONFIGPATH}" ] && [ -f "${CONFIGPATH}/license.pem" ] ; then
+      check_license "${CONFIGPATH}/license.pem"
+      LICENSE_FILE="--license-cert-file ${CONFIGPATH}/license.pem"
+   elif [ -f "/etc/beeond/license.pem" ] ; then
+      check_license "/etc/beeond/license.pem"
+      LICENSE_FILE="--license-cert-file /etc/beeond/license.pem"
+   else
+      print_license_warning_and_exit
+   fi
 
    if [ "${USE_PDSH}" = "true" ]
    then
@@ -1313,7 +1430,6 @@ do_start()
       fi
    fi
 
-   check_hostfile
    check_datapath
    check_mountpoint
 
@@ -1329,9 +1445,6 @@ do_start()
 
 
    print_info "Using status information file: ${STATUSFILE}"
-
-   NODECOUNT=$(grep -v '^$' ${HOSTFILE} | uniq | wc -l) #ignore empty lines
-   NODES=( $(grep -v '^$' ${HOSTFILE} | uniq) ) #store as array and ignore empty lines
 
    # make list of all nodes first - needed for clients and tmpfs mounts
    ALLNODES=$(IFS=,; echo "${NODES[*]}")
@@ -1471,18 +1584,18 @@ do_start()
    echo "*   export BEEGFS_MGMTD_ADDR=\"${MGMTD}:${MGMTD_GRPC_PORT}\""
    if ! [[ -z ${CONNAUTH_FLAG} ]]
    then
-	echo "*"
-	echo "* To configure \`beegfs\` to use the correct connection authentication file,"
-	echo "* please use"
-	echo "*   --auth-file \"${CONFIGPATH}/conn.auth\" or"
-	echo "*   export BEEGFS_AUTH_FILE=\"${CONFIGPATH}/conn.auth\""
+      echo "*"
+      echo "* To configure \`beegfs\` to use the correct connection authentication file,"
+      echo "* please use"
+      echo "*   --auth-file \"${CONFIGPATH}/conn.auth\" or"
+      echo "*   export BEEGFS_AUTH_FILE=\"${CONFIGPATH}/conn.auth\""
    fi
    if ! [[ -z ${TLS_DISABLE} ]]
    then
-	echo "*"
-	echo "* To configure \`beegfs\` to use TLS encryption when talking to mgmtd, use"
-	echo "*   --tls-cert-file \"${CONFIGPATH}/cert.pem\" or"
-	echo "*   export BEEGFS_TLS_CERT_FILE=\"${CONFIGPATH}/cert.pem\""
+      echo "*"
+      echo "* To configure \`beegfs\` to use TLS encryption when talking to mgmtd, use"
+      echo "*   --tls-cert-file \"${CONFIGPATH}/cert.pem\" or"
+      echo "*   export BEEGFS_TLS_CERT_FILE=\"${CONFIGPATH}/cert.pem\""
    fi
    echo " ****************************************************************************** "
 }
@@ -1522,11 +1635,11 @@ do_stop()
             QUIET="true"
          ;;
          \?)
-            echo "ERROR: invalid option: -${OPTARG}" >&2
+            print_error "invalid option: -${OPTARG}"
             print_usage_and_exit
          ;;
          :)
-            echo "ERROR: Option -${OPTARG} requires an argument" >&2
+            print_error "Option -${OPTARG} requires an argument"
             print_usage_and_exit
          ;;
       esac

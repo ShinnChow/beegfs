@@ -1,10 +1,17 @@
+#include <linux/cred.h>
 #include <linux/fs.h>
 #include <linux/xattr.h>
 #include <linux/posix_acl_xattr.h>
+#include <linux/uidgid.h>
+#include <linux/sched.h>
+#include <linux/rcupdate.h>
 
 #include "common/Common.h"
 #include "FhgfsOpsInode.h"
 #include "FhgfsOpsHelper.h"
+#include "FhgfsInode.h"
+#include "BeeGFSNFS4Acl.h"
+#include <linux/security.h>
 #include "FhgfsXAttrHandlers.h"
 
 #define FHGFS_XATTR_USER_PREFIX "user."
@@ -17,6 +24,110 @@
 #define BEEGFS_XATTR_INDEX_TRUSTED                 4 /* Trusted namespace (trusted.*) */
 #define BEEGFS_XATTR_INDEX_SECURITY                5 /* Security namespace (security.*) */
 #define BEEGFS_XATTR_INDEX_SYSTEM                  6 /* System namespace (system.*) */
+
+
+/**
+ * The set-function which is used for all the system.nfs4_acl xattrs.
+ */
+#if defined(KERNEL_HAS_XATTR_HANDLERS_INODE_ARG)
+#if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
+static int BeeGFSXAttr_nfs4AclSet(const struct xattr_handler* handler, struct mnt_idmap* idmap,
+   struct dentry* dentry, struct inode* inode, const char* name, const void* value, size_t size,
+   int flags)
+#elif defined(KERNEL_HAS_USER_NS_MOUNTS)
+static int BeeGFSXAttr_nfs4AclSet(const struct xattr_handler* handler, struct user_namespace* mnt_userns,
+   struct dentry* dentry, struct inode* inode, const char* name, const void* value, size_t size,
+   int flags)
+#else
+static int BeeGFSXAttr_nfs4AclSet(const struct xattr_handler* handler, struct dentry* dentry,
+   struct inode* inode, const char* name, const void* value, size_t size, int flags)
+#endif
+#elif defined(KERNEL_HAS_XATTR_HANDLER_PTR_ARG)
+static int BeeGFSXAttr_nfs4AclSet(const struct xattr_handler* handler, struct dentry* dentry,
+   const char* name, const void* value, size_t size, int flags)
+#endif
+{
+   struct BeeGFSNFS4Acl *acl = NULL;
+   int ret;
+#if defined(KERNEL_HAS_XATTR_HANDLER_PTR_ARG) && !defined(KERNEL_HAS_XATTR_HANDLERS_INODE_ARG)
+   struct inode* inode = dentry->d_inode;
+#endif
+
+#if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
+   if (!inode_owner_or_capable(idmap, inode))
+#elif defined(KERNEL_HAS_USER_NS_MOUNTS)
+   if (!inode_owner_or_capable(mnt_userns, inode))
+#else
+   if (!inode_owner_or_capable(inode))
+#endif
+      return -EPERM;
+
+   /* If value is NULL, remove the NFS4 ACL */
+   if (value == NULL)
+   {
+      printk_fhgfs_debug(KERN_DEBUG, "BeeGFSXAttr_nfs4AclSet: value is NULL, removing ACL");
+      ret = FhgfsOps_removexattrInode(inode, BEEGFS_NFS4ACL_XATTR_NAME);
+      if (!ret)
+         BeeGFSNFS4Acl_invalidateCache(inode);
+
+      return ret;
+   }
+   /* Validate the NFS4 ACL format before storing it */
+   ret = BeeGFSNFS4AclXdr_decode(value, size, &acl);
+   if (ret) {
+      printk_fhgfs_debug(KERN_DEBUG, "BeeGFSXAttr_nfs4AclSet: value verification failed: %d", ret);
+      return ret;
+   }
+
+   /* Free the parsed ACL since we only needed it for validation */
+   BeeGFSNFS4AclXdr_free(acl);
+
+   /* BeeGFS metadata does not support XATTR_REPLACE semantics */
+   flags &= ~XATTR_REPLACE;
+
+   /* Store the raw ACL data to the metadata server */
+   ret = FhgfsOps_setxattr(inode, BEEGFS_NFS4ACL_XATTR_NAME, value, size, flags);
+   if (!ret)
+      BeeGFSNFS4Acl_invalidateCache(inode);
+
+   printk_fhgfs_debug(KERN_DEBUG, "BeeGFSXAttr_nfs4AclSet: FhgfsOps_setxattr result: %d", ret);
+   return ret;
+}
+
+
+/**
+ * The get-function which is used for all the "system.nfs4_acl" xattrs.
+ */
+#if defined(KERNEL_HAS_XATTR_HANDLERS_INODE_ARG)
+static int BeeGFSXAttr_nfs4AclGet(const struct xattr_handler* handler, struct dentry* dentry,
+   struct inode* inode, const char* name, void* value, size_t size)
+#elif defined(KERNEL_HAS_XATTR_HANDLER_PTR_ARG)
+static int BeeGFSXAttr_nfs4AclGet(const struct xattr_handler* handler, struct dentry* dentry,
+   const char* name, void* value, size_t size)
+#endif
+{
+   int ret;
+#if defined(KERNEL_HAS_XATTR_HANDLER_PTR_ARG) && !defined(KERNEL_HAS_XATTR_HANDLERS_INODE_ARG)
+   struct inode* inode = dentry->d_inode;
+#endif
+
+   /* Try once: if too small, bail out (no retry to avoid second RPC) */
+   ret = BeeGFSNFS4Acl_fetch(inode, BEEGFS_NFS4ACL_XATTR_NAME, value, size);
+   printk_fhgfs_debug(KERN_DEBUG, "BeeGFSXAttr_nfs4AclGet: BeeGFSNFS4Acl_fetch result: %d", ret);
+   if (ret == -ENODATA) {
+      __be32 empty_acl = cpu_to_be32(0);
+      if (size == 0)
+         return sizeof(empty_acl);  /* just return size needed */
+
+      if (size < sizeof(empty_acl))
+         return -ERANGE;
+
+      memcpy(value, &empty_acl, sizeof(empty_acl));
+      return sizeof(empty_acl);
+   }
+   /* Return the exact blob; VFS will handle size==0 length probe semantics */
+   return ret;
+}
 
 
 #ifdef KERNEL_HAS_GET_ACL
@@ -496,9 +607,8 @@ int FhgfsXAttr_init_security(struct inode *inode, struct inode *dir,
          &FhgfsXAttr_initxattrs, NULL);
 }
 
-
 #ifdef KERNEL_HAS_GET_ACL
-struct xattr_handler fhgfs_xattr_acl_access_handler =
+const struct xattr_handler fhgfs_xattr_acl_access_handler =
 {
 #ifdef KERNEL_HAS_XATTR_HANDLER_NAME
    .name = XATTR_NAME_POSIX_ACL_ACCESS,
@@ -511,7 +621,7 @@ struct xattr_handler fhgfs_xattr_acl_access_handler =
    .set    = FhgfsXAttrSetACL,
 };
 
-struct xattr_handler fhgfs_xattr_acl_default_handler =
+const struct xattr_handler fhgfs_xattr_acl_default_handler =
 {
 #ifdef KERNEL_HAS_XATTR_HANDLER_NAME
    .name   = XATTR_NAME_POSIX_ACL_DEFAULT,
@@ -525,7 +635,7 @@ struct xattr_handler fhgfs_xattr_acl_default_handler =
 };
 #endif // KERNEL_HAS_GET_ACL
 
-struct xattr_handler fhgfs_xattr_user_handler =
+const struct xattr_handler fhgfs_xattr_user_handler =
 {
    .prefix = FHGFS_XATTR_USER_PREFIX,
    .list   = NULL,
@@ -533,7 +643,7 @@ struct xattr_handler fhgfs_xattr_user_handler =
    .get    = FhgfsXAttr_getUser,
 };
 
-struct xattr_handler fhgfs_xattr_security_handler =
+const struct xattr_handler fhgfs_xattr_security_handler =
 {
    .prefix = FHGFS_XATTR_SECURITY_PREFIX,
    .list   = NULL,
@@ -541,61 +651,8 @@ struct xattr_handler fhgfs_xattr_security_handler =
    .get    = FhgfsXAttr_getSecurity,
 };
 
-#if defined(KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER)
-const struct xattr_handler* const fhgfs_xattr_handlers[] =
-#elif defined(KERNEL_HAS_CONST_XATTR_HANDLER)
-const struct xattr_handler* fhgfs_xattr_handlers[] =
-#else
-struct xattr_handler* fhgfs_xattr_handlers[] =
-#endif
-{
-#ifdef KERNEL_HAS_GET_ACL
-   &fhgfs_xattr_acl_access_handler,
-   &fhgfs_xattr_acl_default_handler,
-#endif
-   &fhgfs_xattr_security_handler,
-   &fhgfs_xattr_user_handler,
-   NULL
+const struct xattr_handler beegfsXAttrNfs4AclHandler = {
+    .name = XATTR_SYSTEM_PREFIX "nfs4_acl",
+    .get  = BeeGFSXAttr_nfs4AclGet,
+    .set  = BeeGFSXAttr_nfs4AclSet,
 };
-
-#if defined(KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER)
-const struct xattr_handler* const fhgfs_xattr_handlers_acl[] =
-#elif defined(KERNEL_HAS_CONST_XATTR_HANDLER)
-const struct xattr_handler* fhgfs_xattr_handlers_acl[] =
-#else
-struct xattr_handler* fhgfs_xattr_handlers_acl[] =
-#endif
-{
-#ifdef KERNEL_HAS_GET_ACL
-   &fhgfs_xattr_acl_access_handler,
-   &fhgfs_xattr_acl_default_handler,
-#endif
-   &fhgfs_xattr_user_handler,
-   NULL
-};
-
-#if defined(KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER)
-const struct xattr_handler* const fhgfs_xattr_handlers_selinux[] =
-#elif defined(KERNEL_HAS_CONST_XATTR_HANDLER)
-const struct xattr_handler* fhgfs_xattr_handlers_selinux[] =
-#else
-struct xattr_handler* fhgfs_xattr_handlers_selinux[] =
-#endif
-{
-   &fhgfs_xattr_security_handler,
-   &fhgfs_xattr_user_handler,
-   NULL
-};
-
-#if defined(KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER)
-const struct xattr_handler* const fhgfs_xattr_handlers_noacl[] =
-#elif defined(KERNEL_HAS_CONST_XATTR_HANDLER)
-const struct xattr_handler* fhgfs_xattr_handlers_noacl[] =
-#else
-struct xattr_handler* fhgfs_xattr_handlers_noacl[] =
-#endif
-{
-   &fhgfs_xattr_user_handler,
-   NULL
-};
-

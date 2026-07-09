@@ -10,6 +10,7 @@
 #include <common/threading/Condition.h>
 #include <common/toolkit/ListTk.h>
 #include <common/toolkit/SocketTk.h>
+#include <common/storage/StorageErrors.h>
 #include <common/Common.h>
 #include "ConnectionList.h"
 #include "ConnectionListIter.h"
@@ -29,10 +30,19 @@ struct NodeConnPool;
 typedef struct NodeConnPool NodeConnPool;
 
 
-extern void NodeConnPool_init(NodeConnPool* this, struct App* app, struct Node* parentNode,
-   unsigned short streamPort, NicAddressList* nicList, NicAddressList* localRdmaNicList);
-extern NodeConnPool* NodeConnPool_construct(struct App* app, struct Node* parentNode,
-   unsigned short streamPort, NicAddressList* nicList, NicAddressList* localRdmaNicList);
+
+typedef struct NodeConnPool_InitParams NodeConnPool_InitParams;
+struct NodeConnPool_InitParams
+{
+   struct App* app;
+   struct Node* parentNode;
+   unsigned short streamPort;
+   NicAddressList* nicList;
+   NicAddressList* localRdmaNicList;
+};
+
+extern void NodeConnPool_init(NodeConnPool* this, NodeConnPool_InitParams const *params);
+extern NodeConnPool* NodeConnPool_construct(NodeConnPool_InitParams const *params);
 extern void NodeConnPool_uninit(NodeConnPool* this);
 extern void NodeConnPool_destruct(NodeConnPool* this);
 

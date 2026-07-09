@@ -11,12 +11,21 @@
 #include "FhgfsOpsDir.h"
 #include "FhgfsOpsInode.h"
 #include "FhgfsOpsSuper.h"
-
+#include "FhgfsXAttrHandlers.h"
+#include "BeeGFSNFS4Acl.h"
+#include <linux/rcupdate.h>
 
 /**
   * A basic permission() method. Only required to tell the VFS we do not support RCU path walking.
   *
   * @return 0 on success, negative linux error code otherwise
+  *
+  * Legacy behavior: BeeGFS does not support permission evaluation in VFS RCU-walk mode, so
+  * MAY_NOT_BLOCK/IPERM_FLAG_RCU returns -ECHILD and VFS retries in blocking context.
+  *
+  * NFS4 ACL cache behavior: in blocking context, when NFS4 ACL support is enabled, cached ACL
+  * entries are read under RCU. On cache miss, the ACL is fetched, cached, and then evaluated. If
+  * no NFS4 ACL exists or ACL evaluation is undecided, fall back to mode-bit permission checks.
   */
 #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
    int FhgfsOps_permission(struct mnt_idmap* idmap, struct inode *inode, int mask)
@@ -31,6 +40,13 @@
    int FhgfsOps_permission(struct inode *inode, int mask, struct nameidata *nd)
 #endif
 {
+   const struct cred *cred = current_cred();
+   const struct BeeGFSNFS4AclCache *cached_acl;
+   enum BeeGFSNFS4AclResolveResult resolve;
+   int rc;
+   App* app = FhgfsOps_getApp(inode->i_sb);
+   Config* cfg = App_getConfig(app);
+
     /* note: 2.6.38 introduced rcu-walk mode, which is inappropriate for us, because we need the
        parent. the code below tells vfs to call this again in old ref-walk mode.
        (see Documentation/filesystems/vfs.txt:d_revalidate) */
@@ -42,15 +58,40 @@
          return -ECHILD;
    #endif // LINUX_VERSION_CODE
 
-   #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
-      return generic_permission(idmap, inode, mask);
-   #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
-      return generic_permission(mnt_userns, inode, mask);
-   #else
-      return os_generic_permission(inode, mask);
-   #endif
-}
+   if (Config_getSysNFSv4ACLsEnabled(cfg))
+   {
+      resolve = BeeGFSNFS4Acl_resolveCache(inode, cfg, &cached_acl, &rc);
+      switch (resolve)
+      {
+         case BEEGFS_NFS4ACL_RESOLVE_POSITIVE_HIT:
+            /* Evaluate cached ACL under RCU; only fall back if undecided. */
+            rc = BeeGFSNFS4Acl_checkPermission(cached_acl->acl, inode, cred, mask, inode->i_ino);
+            rcu_read_unlock();
+            if (rc <= 0)
+               return rc;
+            break;
 
+         case BEEGFS_NFS4ACL_RESOLVE_ERROR:
+            return rc;
+
+         default:
+            /* NEGATIVE_HIT and FALLBACK both use generic mode-bit checks. */
+            break;
+      }
+   }
+   /* NFS4 ACLs disabled - use POSIX mode bits only */
+#ifdef KERNEL_HAS_GENERIC_PERMISSION_2
+   return generic_permission(inode, mask);
+#elif defined(KERNEL_HAS_GENERIC_PERMISSION_4)
+   return generic_permission(inode, mask, 0, NULL);
+#elif defined(KERNEL_HAS_IDMAPPED_MOUNTS)
+   return generic_permission(idmap, inode, mask);
+#elif defined(KERNEL_HAS_USER_NS_MOUNTS)
+   return generic_permission(mnt_userns, inode, mask);
+#else
+   return generic_permission(inode, mask, NULL);
+#endif
+}
 
 int FhgfsOps_statfs(struct dentry* dentry, struct kstatfs* kstatfs)
 {
@@ -117,7 +158,7 @@ int FhgfsOps_getSB(struct file_system_type *fs_type,
    return get_sb_nodev(fs_type, flags, data, FhgfsOps_fillSuper, mnt);
 }
 
-#else
+#elif defined(KERNEL_HAS_MOUNT_NODEV)
 
 /* kernel 2.6.39 switched from get_sb() to mount(), which provides similar functionality from our
    point of view. */

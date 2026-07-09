@@ -1,4 +1,4 @@
-#include <common/app/config/ICommonConfig.h>
+#include <common/app/config/CommonConfig.h>
 #include <common/storage/Metadata.h>
 #include <common/toolkit/FDHandle.h>
 #include <common/toolkit/MapTk.h>
@@ -319,7 +319,7 @@ bool StorageTk::statStoragePathOverride(std::string pathStr, int64_t* outSizeFre
    bool spaceFilePathExists = StorageTk::pathExists(spaceFilePath.str() );
    if(spaceFilePathExists)
    {
-      ICommonConfig::loadStringListFile(spaceFilePath.str().c_str(), spaceList);
+      CommonConfig::loadStringListFile(spaceFilePath.str().c_str(), spaceList);
       if(!(spaceList.empty() || spaceList.begin()->empty() ) )
       {
          *outSizeFree = UnitTk::strHumanToInt64(spaceList.begin()->c_str() );
@@ -330,7 +330,7 @@ bool StorageTk::statStoragePathOverride(std::string pathStr, int64_t* outSizeFre
    bool inodesFilePathExists = StorageTk::pathExists(inodesFilePath.str() );
    if(inodesFilePathExists)
    {
-      ICommonConfig::loadStringListFile(inodesFilePath.str().c_str(), inodesList);
+      CommonConfig::loadStringListFile(inodesFilePath.str().c_str(), inodesList);
       if(!(inodesList.empty() || inodesList.begin()->empty() ) )
       {
          *outInodesFree = UnitTk::strHumanToInt64(inodesList.begin()->c_str() );
@@ -615,7 +615,7 @@ std::string StorageTk::readOrCreateRegistrationToken(const std::string pathStr, 
    StringList idList; // actually, the file would contain only a single line
 
    if(StorageTk::pathExists(p.str()))
-      ICommonConfig::loadStringListFile(p.str().c_str(), idList);
+      CommonConfig::loadStringListFile(p.str().c_str(), idList);
 
    if(!idList.empty()) {
       return *idList.begin();
@@ -646,7 +646,7 @@ void StorageTk::readTargetIDFile(const std::string pathStr, std::string* outTarg
 
    bool targetIDPathExists = StorageTk::pathExists(targetIDPath.str() );
    if(targetIDPathExists)
-      ICommonConfig::loadStringListFile(targetIDPath.str().c_str(), targetIDList);
+      CommonConfig::loadStringListFile(targetIDPath.str().c_str(), targetIDList);
 
    std::string oldTargetID;
 
@@ -1037,7 +1037,7 @@ std::pair<FhgfsOpsErr,NumericT> StorageTk::readNumFromFile(const std::string& pa
 
    // read the file
    StringList contents;
-   ICommonConfig::loadStringListFile(filePath.str().c_str(), contents);
+   CommonConfig::loadStringListFile(filePath.str().c_str(), contents);
 
    if ( contents.empty() )
       return { FhgfsOpsErr_NODATA, NumericT(0) };

@@ -13,6 +13,8 @@
 #include <common/net/message/nodes/RemoveNodeMsgEx.h>
 #include <common/net/message/nodes/RemoveNodeRespMsg.h>
 #include <common/net/message/nodes/SetMirrorBuddyGroupMsgEx.h>
+#include <common/net/message/nodes/HandshakeRespMsg.h>
+
 // storage messages
 #include <common/net/message/storage/creating/MkDirRespMsg.h>
 #include <common/net/message/storage/creating/MkFileRespMsg.h>
@@ -21,10 +23,12 @@
 #include <common/net/message/storage/creating/UnlinkFileRespMsg.h>
 #include <common/net/message/storage/listing/ListDirFromOffsetRespMsg.h>
 #include <common/net/message/storage/attribs/ListXAttrRespMsg.h>
+#include <common/net/message/storage/attribs/ReadInvalidationsRespMsg.h>
 #include <common/net/message/storage/attribs/GetXAttrRespMsg.h>
 #include <common/net/message/storage/attribs/RemoveXAttrRespMsg.h>
 #include <common/net/message/storage/attribs/SetXAttrRespMsg.h>
 #include <common/net/message/storage/attribs/SetFileStateRespMsg.h>
+#include <common/net/message/storage/attribs/GetEntryInfoRespMsg.h>
 #include <common/net/message/storage/attribs/RefreshEntryInfoRespMsg.h>
 #include <common/net/message/storage/moving/RenameRespMsg.h>
 #include <common/net/message/storage/lookup/LookupIntentRespMsg.h>
@@ -173,6 +177,7 @@ NetMessage* NetMessageFactory_createFromMsgType(unsigned short msgType)
       HANDLE(RemoveNode, RemoveNodeMsgEx);
       HANDLE(RemoveNodeResp, RemoveNodeRespMsg);
       HANDLE(SetMirrorBuddyGroup, SetMirrorBuddyGroupMsgEx);
+      HANDLE(HandshakeResp, HandshakeRespMsg);
       // storage messages
       HANDLE(LookupIntentResp, LookupIntentRespMsg);
       HANDLE(MkDirResp, MkDirRespMsg);
@@ -185,10 +190,12 @@ NetMessage* NetMessageFactory_createFromMsgType(unsigned short msgType)
       HANDLE(ListDirFromOffsetResp, ListDirFromOffsetRespMsg);
       HANDLE(SetAttrResp, SetAttrRespMsg);
       HANDLE(SetFileStateResp, SetFileStateRespMsg);
+      HANDLE(GetEntryInfoResp, GetEntryInfoRespMsg);
       HANDLE(StatResp, StatRespMsg);
       HANDLE(StatStoragePathResp, StatStoragePathRespMsg);
       HANDLE(TruncFileResp, TruncFileRespMsg);
       HANDLE(ListXAttrResp, ListXAttrRespMsg);
+      HANDLE(ReadInvalidationsResp, ReadInvalidationsRespMsg);
       HANDLE(GetXAttrResp, GetXAttrRespMsg);
       HANDLE(RemoveXAttrResp, RemoveXAttrRespMsg);
       HANDLE(SetXAttrResp, SetXAttrRespMsg);

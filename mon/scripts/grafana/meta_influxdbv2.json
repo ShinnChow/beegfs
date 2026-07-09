@@ -25,6 +25,12 @@
     },
     {
       "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
       "id": "table",
       "name": "Table",
       "version": ""
@@ -840,6 +846,830 @@
       ],
       "title": "Worklist Size",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "BAD": {
+                  "color": "red",
+                  "index": 1,
+                  "text": "Bad"
+                },
+                "GOOD": {
+                  "color": "#4ac09b75",
+                  "index": 0,
+                  "text": "Good"
+                },
+                "NEEDS_RESYNC": {
+                  "color": "orange",
+                  "index": 2,
+                  "text": "Needs Resync"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 16
+      },
+      "id": 32,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^_value$/",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "9.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+          },
+          "query": "from(bucket: \"${bucket}\")    \r\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)    \r\n  |> filter(fn: (r) => r.nodeNumID == \"${metaID}\")\r\n  |> filter(fn: (r) => r._measurement == \"metaTargets\")\r\n  |> filter(fn: (r) => r._field == \"targetConsistencyState\")\r\n  |> last()\r\n  |> keep(columns: [\"_value\"])",
+          "refId": "A"
+        }
+      ],
+      "title": "Target Consistency State",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 60,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "diskSpaceTotal"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Disk Total"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "light-purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "diskSpaceUsed"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Disk Used"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "#EAB839",
+                      "value": 70
+                    },
+                    {
+                      "color": "red",
+                      "value": 85
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "diskSpaceFree"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 4,
+        "y": 16
+      },
+      "id": 28,
+      "options": {
+        "legend": {
+          "calcs": [
+            "max",
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+          },
+          "query": "from(bucket: \"${bucket}\")  \r\n|> range(start: v.timeRangeStart, stop:v.timeRangeStop)  \r\n|> filter(fn: (r) =>    r.nodeNumID == \"${metaID}\") \r\n|> filter(fn: (r) =>    r._measurement == \"metaTargets\")\r\n|> filter(fn: (r) =>    r._field == \"diskSpaceTotal\" or r._field == \"diskSpaceFree\")\r\n|> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\r\n|> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\r\n|> map(fn: (r) => ({ r with _value: r.diskSpaceTotal - r.diskSpaceFree }))\r\n|> rename(columns: {_value: \"diskSpaceUsed\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "Disk Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 60,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "inodesTotal"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Inodes Total"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#ccccdc",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "inodesUsed"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Inodes Used"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "orange",
+                      "value": null
+                    },
+                    {
+                      "color": "#ff4081",
+                      "value": 75
+                    },
+                    {
+                      "color": "red",
+                      "value": 80
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "inodesFree"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 16
+      },
+      "id": 30,
+      "options": {
+        "legend": {
+          "calcs": [
+            "max",
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+          },
+          "query": "from(bucket: \"${bucket}\")  \r\n|> range(start: v.timeRangeStart, stop:v.timeRangeStop)  \r\n|> filter(fn: (r) =>    r.nodeNumID == \"${metaID}\")  \r\n|> filter(fn: (r) =>    r._measurement == \"metaTargets\")\r\n|> filter(fn: (r) =>    r._field == \"inodesTotal\" or r._field == \"inodesFree\" )\r\n|> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\r\n|> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\r\n|> map(fn: (r) => ({ r with _value: r.inodesTotal - r.inodesFree }))\r\n|> rename(columns: {_value: \"inodesUsed\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "Inodes Usage",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": true,
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 100,
+      "panels": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+          },
+          "description": "Number of clients currently subscribed for inode invalidations on this meta node.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "#3274d9",
+                "mode": "fixed"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 4,
+            "x": 0,
+            "y": 25
+          },
+          "id": 102,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.3.0",
+          "targets": [
+            {
+              "alias": "Subscribed Clients",
+              "datasource": {
+                "type": "influxdb",
+                "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+              },
+              "groupBy": [
+                {
+                  "params": [
+                    "$__interval"
+                  ],
+                  "type": "time"
+                },
+                {
+                  "params": [
+                    "null"
+                  ],
+                  "type": "fill"
+                }
+              ],
+              "measurement": "meta",
+              "orderByTime": "ASC",
+              "policy": "default",
+              "query": "from(bucket: \"${bucket}\")  |> range(start: v.timeRangeStart, stop:v.timeRangeStop)  |> filter(fn: (r) =>    r.nodeNumID == \"${metaID}\" and     r._measurement == \"meta\" and    r._field == \"invalNumWatchers\") |> group(columns: [\"nodeNumID\"], mode: \"by\") |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)  |> rename(columns: {_value: \"Subscribed Clients\"})",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "select": [
+                [
+                  {
+                    "params": [
+                      "invalNumWatchers"
+                    ],
+                    "type": "field"
+                  },
+                  {
+                    "params": [],
+                    "type": "max"
+                  }
+                ]
+              ],
+              "tags": [
+                {
+                  "key": "nodeID",
+                  "operator": "=~",
+                  "value": "/^$metaID$/"
+                }
+              ]
+            }
+          ],
+          "title": "Subscribed Clients",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+          },
+          "description": "Number of inodes currently cached in the meta server's inode store.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 30,
+                "gradientMode": "opacity",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Inodes cached at Meta"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Inodes cached at Meta"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 10,
+            "x": 4,
+            "y": 25
+          },
+          "id": 101,
+          "options": {
+            "legend": {
+              "calcs": [
+                "max",
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "alias": "Inodes cached at Meta",
+              "datasource": {
+                "type": "influxdb",
+                "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+              },
+              "groupBy": [
+                {
+                  "params": [
+                    "$__interval"
+                  ],
+                  "type": "time"
+                },
+                {
+                  "params": [
+                    "null"
+                  ],
+                  "type": "fill"
+                }
+              ],
+              "hide": false,
+              "measurement": "meta",
+              "orderByTime": "ASC",
+              "policy": "default",
+              "query": "from(bucket: \"${bucket}\")  |> range(start: v.timeRangeStart, stop:v.timeRangeStop)  |> filter(fn: (r) =>    r.nodeNumID == \"${metaID}\" and     r._measurement == \"meta\" and    r._field == \"invalWatchNumInodes\") |> group(columns: [\"nodeNumID\"], mode: \"by\") |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)  |> rename(columns: {_value: \"Inodes cached at Meta\"})",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "select": [
+                [
+                  {
+                    "params": [
+                      "invalWatchNumInodes"
+                    ],
+                    "type": "field"
+                  },
+                  {
+                    "params": [],
+                    "type": "max"
+                  }
+                ]
+              ],
+              "tags": [
+                {
+                  "key": "nodeID",
+                  "operator": "=~",
+                  "value": "/^$metaID$/"
+                }
+              ]
+            }
+          ],
+          "title": "Inodes cached at Meta",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+          },
+          "description": "Rate of inode invalidations sent from this meta to clients (sum of per-client cumulative counters, derivative).",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "#ffb357",
+                "mode": "fixed"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 30,
+                "gradientMode": "opacity",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Invalidations/sec"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Invalidations/sec"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 10,
+            "x": 14,
+            "y": 25
+          },
+          "id": 103,
+          "options": {
+            "legend": {
+              "calcs": [
+                "max",
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "alias": "Invalidations/sec",
+              "datasource": {
+                "type": "influxdb",
+                "uid": "${DS_BEEGFS_MON_INFLUXDB}"
+              },
+              "groupBy": [
+                {
+                  "params": [
+                    "$__interval"
+                  ],
+                  "type": "time"
+                },
+                {
+                  "params": [
+                    "null"
+                  ],
+                  "type": "fill"
+                }
+              ],
+              "measurement": "invalWatchPerClient",
+              "orderByTime": "ASC",
+              "policy": "default",
+              "query": "from(bucket: \"${bucket}\")  |> range(start: v.timeRangeStart, stop:v.timeRangeStop)  |> filter(fn: (r) =>    r.nodeNumID == \"${metaID}\" and     r._measurement == \"invalWatchPerClient\" and    r._field == \"numInvalidations\") |> group(columns: [\"clientId\"], mode: \"by\") |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false) |> derivative(unit: 1s, nonNegative: true) |> group(columns: [\"nodeNumID\"], mode: \"by\") |> aggregateWindow(every: v.windowPeriod, fn: sum, createEmpty: false) |> rename(columns: {_value: \"Invalidations/sec\"})",
+              "refId": "A",
+              "resultFormat": "time_series",
+              "select": [
+                [
+                  {
+                    "params": [
+                      "numInvalidations"
+                    ],
+                    "type": "field"
+                  },
+                  {
+                    "params": [],
+                    "type": "max"
+                  }
+                ]
+              ],
+              "tags": [
+                {
+                  "key": "nodeID",
+                  "operator": "=~",
+                  "value": "/^$metaID$/"
+                }
+              ]
+            }
+          ],
+          "title": "Inode Invalidation Rate (all clients)",
+          "type": "timeseries"
+        }
+      ],
+      "title": "Metadata Cache",
+      "type": "row"
     }
   ],
   "refresh": "",
@@ -898,6 +1728,6 @@
   "timezone": "",
   "title": "BeeGFS Meta Server",
   "uid": "OTSb6z",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

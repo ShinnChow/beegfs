@@ -2,6 +2,7 @@
 #include "MapTk.h"
 
 #include <fstream>
+#include <sys/stat.h>
 
 /**
  * Splits a line into param and value (divided by the '='-char) and adds it to

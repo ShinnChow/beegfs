@@ -1,8 +1,10 @@
 #include <common/nodes/Node.h>
 #include <components/DatagramListener.h>
+#include <components/InvalReader.h>
 #include <nodes/NodeStoreEx.h>
 #include <common/toolkit/SocketTk.h>
 #include <common/net/msghelpers/MsgHelperAck.h>
+
 #include <app/App.h>
 #include "RemoveNodeRespMsg.h"
 #include "RemoveNodeMsgEx.h"
@@ -73,6 +75,10 @@ bool __RemoveNodeMsgEx_processIncoming(NetMessage* this, struct App* app,
       NodeStoreEx* nodes = App_getMetaNodes(app);
       if(NodeStoreEx_deleteNode(nodes, nodeID) )
          Logger_logFormatted(log, Log_WARNING, logContext, "Removed metadata node: %hu", nodeID.value);
+      if (app->invalReader)
+      {
+         InvalReader_stopMetaThread(app->invalReader, nodeID);
+      }
    }
    else
    if(nodeType == NODETYPE_Storage)

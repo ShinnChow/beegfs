@@ -258,7 +258,7 @@ bool FhgfsChunkPageVec_pushPage(FhgfsChunkPageVec* this, struct page* page,
    if ((this->size  + this->firstPageChunkOffset) == this->numChunkPages)
       return false; // pageVec full
 
-   if ((this->size) && (this->lastPageIdx + 1 != page->index) )
+   if ((this->size) && (this->lastPageIdx + 1 != page_index(page)) )
       return false; // non-consecutive page
 
    pushSuccess = FhgfsPageListVec_pushPage(this->lastAllocListVec, page,
@@ -288,12 +288,13 @@ bool FhgfsChunkPageVec_pushPage(FhgfsChunkPageVec* this, struct page* page,
    if (!this->size)
    {
       this->firstPageFileOffset = page_offset(page);
-      this->firstPageIdx = page->index;
+      this->firstPageIdx = page_index(page);
 
-      this->firstPageChunkOffset = _FhgfsChunkPageVec_getChunkPageOffset(this, page->index);
+      this->firstPageChunkOffset = _FhgfsChunkPageVec_getChunkPageOffset(this,
+         page_index(page));
    }
 
-   this->lastPageIdx = page->index;
+   this->lastPageIdx = page_index(page);
 
    this->size++;
 

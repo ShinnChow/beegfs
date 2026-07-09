@@ -1,5 +1,10 @@
 #!/bin/bash
 
+#####################################################################
+# This script is the authoritative source for new feature probes.
+# Do not add new checks to KernelFeatureDetection.mk; use this file instead.
+#####################################################################
+
 set -e
 
 # running jobs in parallel
@@ -250,6 +255,11 @@ run_job check_function \
    KERNEL_HAS_FILE_DENTRY \
    linux/fs.h
 
+run_job check_struct_field \
+   super_block::s_bdi \
+   KERNEL_HAS_SB_BDI \
+   linux/fs.h
+
 run_job check_function \
    super_setup_bdi_name "int (struct super_block *sb, char *fmt, ...)" \
    KERNEL_HAS_SUPER_SETUP_BDI_NAME \
@@ -469,8 +479,17 @@ run_job check_function \
    KERNEL_HAS_USER_NS_MOUNTS \
    linux/fs.h
 
+# vfs_create() takes mnt_idmap, parent inode, dentry, mode, and an exclusive-create
+# flag up to Linux 6.18.
 run_job check_function \
    vfs_create "int (struct mnt_idmap *, struct inode *, struct dentry *, umode_t, bool)" \
+   KERNEL_HAS_IDMAPPED_MOUNTS \
+   linux/fs.h
+
+# Linux 6.19 changed the vfs_create() arguments to mnt_idmap, dentry, mode, and
+# delegated_inode.
+run_job check_function \
+   vfs_create "int (struct mnt_idmap *, struct dentry *, umode_t, struct delegated_inode *)" \
    KERNEL_HAS_IDMAPPED_MOUNTS \
    linux/fs.h
 
@@ -479,11 +498,6 @@ run_job check_function \
    mapped_kuid_fs "kuid_t (struct user_namespace *, struct user_namespace *, kuid_t)" \
    KERNEL_HAS_MAPPED_KUID_FS \
    linux/mnt_idmapping.h
-
-run_job check_struct_field_type \
-   file_operations::iterate "int (*)(struct file *, struct dir_context *)" \
-   KERNEL_HAS_FOPS_ITERATE \
-   linux/fs.h
 
 run_job check_struct_field_type \
    xattr_handler::set "int (*)(const struct xattr_handler *, struct dentry *, struct inode *, const char *, const void *, size_t, int)" \
@@ -542,6 +556,137 @@ run_job check_struct_field_type \
    dentry_operations::d_revalidate "int (*)(struct inode *parentInode, const struct qstr *name, struct dentry* dentry, unsigned flags)" \
    KERNEL_HAS_D_REVALIDATE_STABLE_REFERENCES \
    linux/namei.h
+
+# These checks are for newer kernels starting with 6.18.
+#
+# Linux 7.0 changed posix_acl_to_xattr() to return an allocated buffer.
+
+run_job check_function \
+   posix_acl_to_xattr "void * (struct user_namespace *, const struct posix_acl *, size_t *, gfp_t)" \
+   KERNEL_HAS_POSIX_ACL_TO_XATTR_ALLOC \
+   linux/fs.h \
+   linux/posix_acl_xattr.h
+
+# SB_NODIRATIME is exposed through linux/fs.h on kernels up to 6.18 and through
+# linux/fs/super_types.h on Linux 6.19+. Probe both locations; normally only
+# one succeeds and emits KERNEL_HAS_SB_NODIRATIME.
+run_job check_symbol \
+   SB_NODIRATIME \
+   KERNEL_HAS_SB_NODIRATIME \
+   linux/fs.h
+
+run_job check_symbol \
+   SB_NODIRATIME \
+   KERNEL_HAS_SB_NODIRATIME \
+   linux/fs/super_types.h
+
+run_job check_function \
+   set_default_d_op "void (struct super_block *, const struct dentry_operations *)" \
+   KERNEL_HAS_SET_DEFAULT_D_OP \
+   linux/dcache.h
+
+# kernel_connect/kernel_bind use sockaddr_unsized on newer kernels starting 6.19
+run_job check_function \
+   kernel_connect "int (struct socket *, struct sockaddr_unsized *, int, int)" \
+   KERNEL_HAS_KERNEL_CONNECT_ADDR_UNSIZED \
+   linux/net.h
+
+# dev_get_flags() was replaced by netif_get_flags() in newer kernels
+run_job check_function \
+   netif_get_flags "unsigned int (const struct net_device *)" \
+   KERNEL_HAS_NETIF_GET_FLAGS \
+   linux/netdevice.h
+
+run_job check_struct_field_type \
+   super_block::s_xattr "const struct xattr_handler **" \
+   KERNEL_HAS_CONST_XATTR_HANDLER \
+   linux/fs.h
+
+# const struct xattr_handler * const * for super_block::s_xattr is exposed
+# through linux/fs.h on kernels up to 6.16 and through linux/fs/super_types.h
+# on Linux 6.17+. Probe both locations; normally only one succeeds and emits
+# KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER.
+run_job check_struct_field_type \
+   super_block::s_xattr "const struct xattr_handler * const *" \
+   KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER \
+   linux/fs.h
+
+run_job check_struct_field_type \
+   super_block::s_xattr "const struct xattr_handler * const *" \
+   KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER \
+   linux/fs/super_types.h
+
+# Older kernels keep the signature in fs.h; newer kernels 6.18 moved it to fs/super_types.h.
+run_job check_struct_field_type \
+   super_operations::show_options "int (*)(struct seq_file *, struct dentry *)" \
+   KERNEL_HAS_SHOW_OPTIONS_DENTRY \
+   linux/fs.h
+
+run_job check_struct_field_type \
+   super_operations::show_options "int (*)(struct seq_file *, struct dentry *)" \
+   KERNEL_HAS_SHOW_OPTIONS_DENTRY \
+   linux/fs/super_types.h
+
+# readahead_page() moved around; detect in pagemap.h
+run_job check_function \
+   readahead_page "struct page * (struct readahead_control *)" \
+   KERNEL_HAS_READAHEAD_PAGE \
+   linux/pagemap.h
+
+#Find out whether inode_operations.mkdir returns struct dentry *
+run_job check_struct_field_type \
+   inode_operations::mkdir "struct dentry *(*)(struct mnt_idmap *, struct inode *, struct dentry *, umode_t)" \
+   KERNEL_HAS_MKDIR_RET_DENTRY \
+   linux/fs.h
+
+run_job check_function \
+   inode_just_drop "int (struct inode *)" \
+   KERNEL_HAS_INODE_JUST_DROP \
+   linux/fs.h
+
+run_job check_struct_field \
+   file::__f_path \
+   KERNEL_HAS_FILE__F_PATH \
+   linux/fs.h
+
+run_job check_function \
+   inode_state_read_once "enum inode_state_flags_enum (struct inode *)" \
+   KERNEL_HAS_INODE_STATE_READ_ONCE \
+   linux/fs.h
+
+run_job check_struct_field_type \
+   address_space_operations::write_begin "int (*)(const struct kiocb *, struct address_space *, loff_t, unsigned int, struct folio **, void **)" \
+   KERNEL_WRITE_BEGIN_HAS_KIOCB \
+   linux/fs.h
+
+run_job check_struct_field_type \
+   address_space_operations::write_end "int (*)(const struct kiocb *, struct address_space *, loff_t, unsigned int, unsigned int, struct folio *, void *)" \
+   KERNEL_WRITE_END_HAS_KIOCB \
+   linux/fs.h
+
+# Old mount helper used while the legacy mount path is available.
+# mount_nodev() was removed during the Linux 6.18 development window, while
+# file_system_type::mount can still exist afterwards. This makes mount_nodev()
+# the actual boundary for switching to file_system_type::init_fs_context.
+run_job check_function \
+   mount_nodev "struct dentry * (struct file_system_type *, int, void *, int (*)(struct super_block *, void *, int))" \
+   KERNEL_HAS_MOUNT_NODEV \
+   linux/fs.h
+
+run_job check_function \
+   writeback_iter "struct folio * (struct address_space *, struct writeback_control *, struct folio *, int *)" \
+   KERNEL_HAS_WRITEBACK_ITER \
+   linux/writeback.h
+
+run_job check_struct_field_type \
+   address_space_operations::migrate_folio "int (*)(struct address_space *, struct folio *, struct folio *, enum migrate_mode)" \
+   KERNEL_HAS_MIGRATE_FOLIO \
+   linux/fs.h
+
+run_job check_function \
+   ratelimit_state_get_miss "int (struct ratelimit_state *)" \
+   KERNEL_HAS_RATELIMIT_STATE_GET_MISS \
+   linux/ratelimit.h
 
 wait_jobs 0
 

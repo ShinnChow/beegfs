@@ -1,9 +1,12 @@
 #include <common/toolkit/StringTk.h>
 #include <common/toolkit/StorageTk.h>
+#include <common/toolkit/ArrayTypeTraits.h>
 #include <common/app/log/LogContext.h>
 #include <common/app/log/Logger.h>
 #include "AbstractConfig.h"
 #include "common/toolkit/HashTk.h"
+
+#include <../generated/CommonConfigFields.inc>  // bake in data definitions
 
 
 #define ABSTRACTCONF_AUTHFILE_READSIZE 1024 // max amount of data that we read from auth file
@@ -59,52 +62,7 @@ void AbstractConfig::initConfig(int argc, char** argv, bool enableException, boo
  */
 void AbstractConfig::loadDefaults(bool addDashes)
 {
-   configMapRedefine("cfgFile",                  "", addDashes);
-
-   configMapRedefine("logType",                  "logfile", addDashes);
-   configMapRedefine("logLevel",                 "3", addDashes);
-   configMapRedefine("logNoDate",                "true", addDashes);
-   configMapRedefine("logStdFile",               "", addDashes);
-   configMapRedefine("logNumLines",              "50000", addDashes);
-   configMapRedefine("logNumRotatedFiles",       "2", addDashes);
-
-   configMapRedefine("connPortShift",              "0", addDashes);
-
-   // To be able to merge these with the legacy settings later, we set them to -1 here. Otherwise it
-   // is impossible to detect if they have actually been set or just loaded the default.
-   // The actual default values are applied during the post processing in applyConfigMap.
-   configMapRedefine("connClientPort",             "-1", addDashes); // 8004
-   configMapRedefine("connStoragePort",            "-1", addDashes); // 8003
-   configMapRedefine("connMetaPort",               "-1", addDashes); // 8005
-   configMapRedefine("connMonPort",                "-1", addDashes); // 8007
-   configMapRedefine("connMgmtdPort",              "-1", addDashes); // 8008
-
-   configMapRedefine("connUseRDMA",                "true", addDashes);
-   configMapRedefine("connBacklogTCP",             "64", addDashes);
-   configMapRedefine("connMaxInternodeNum",        "6", addDashes);
-   configMapRedefine("connFallbackExpirationSecs", "900", addDashes);
-   configMapRedefine("connTCPRcvBufSize",          "0", addDashes);
-   configMapRedefine("connUDPRcvBufSize",          "0", addDashes);
-   configMapRedefine("connRDMABufSize",            "8192", addDashes);
-   configMapRedefine("connRDMABufNum",             "70", addDashes);
-   configMapRedefine("connRDMATypeOfService",      "0", addDashes);
-   configMapRedefine("connNetFilterFile",          "", addDashes);
-   configMapRedefine("connAuthFile",               "", addDashes);
-   configMapRedefine("connDisableAuthentication",  "false", addDashes);
-   configMapRedefine("connTcpOnlyFilterFile",      "", addDashes);
-   configMapRedefine("connRestrictOutboundInterfaces", "false", addDashes);
-   configMapRedefine("connNoDefaultRoute",         "::/0", addDashes);
-   configMapRedefine("connDisableIPv6",            "false", addDashes);
-
-   /* connMessagingTimeouts: default to zero, indicating that constants
-    * specified in Common.h are used.
-    */
-   configMapRedefine("connMessagingTimeouts",      "0,0,0", addDashes);
-   // connRDMATimeouts: zero values are interpreted as the defaults specified in IBVSocket.cpp
-   configMapRedefine("connRDMATimeouts",           "0,0,0", addDashes);
-
-   configMapRedefine("sysMgmtdHost",               "",    addDashes);
-   configMapRedefine("sysUpdateTargetStatesSecs",  "0", addDashes);
+   commonLoadConfigDefaults(&this->configMap, ArraySlice(CommonConfigFields_infos), addDashes);
 }
 
 /**
@@ -114,176 +72,7 @@ void AbstractConfig::loadDefaults(bool addDashes)
  */
 void AbstractConfig::applyConfigMap(bool enableException, bool addDashes)
 {
-   // Deprecated separate port settings. These are post processed below and merged into the new
-   // combined settings.
-   int connClientPortUDP = -1;
-   int connMgmtdPortUDP = -1;
-   int connMetaPortUDP = -1;
-   int connStoragePortUDP = -1;
-   int connMonPortUDP = -1;
-   int connClientPortTCP = -1;
-   int connMgmtdPortTCP = -1;
-   int connMetaPortTCP = -1;
-   int connStoragePortTCP = -1;
-   int connMonPortTCP = -1;
-
-   for (StringMapIter iter = configMap.begin(); iter != configMap.end();)
-   {
-      bool unknownElement = false;
-
-      if (testConfigMapKeyMatch(iter, "cfgFile", addDashes))
-         cfgFile = iter->second;
-      else if (testConfigMapKeyMatch(iter, "logLevel", addDashes))
-         logLevel = StringTk::strToInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "logNoDate", addDashes))
-         logNoDate = StringTk::strToBool(iter->second);
-      else if (testConfigMapKeyMatch(iter, "logStdFile", addDashes))
-         logStdFile = iter->second;
-      else if (testConfigMapKeyMatch(iter, "logNumLines", addDashes))
-         logNumLines = StringTk::strToInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "logNumRotatedFiles", addDashes))
-         logNumRotatedFiles = StringTk::strToInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connPortShift", addDashes))
-         connPortShift = StringTk::strToInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connClientPort", addDashes))
-         assignKeyIfNotZero(iter, connClientPort, enableException);
-      else if (testConfigMapKeyMatch(iter, "connStoragePort", addDashes))
-         assignKeyIfNotZero(iter, connStoragePort, enableException);
-      else if (testConfigMapKeyMatch(iter, "connMetaPort", addDashes))
-         assignKeyIfNotZero(iter, connMetaPort, enableException);
-      else if (testConfigMapKeyMatch(iter, "connMonPort", addDashes))
-         assignKeyIfNotZero(iter, connMonPort, enableException);
-      else if (testConfigMapKeyMatch(iter, "connMgmtdPort", addDashes))
-         assignKeyIfNotZero(iter, connMgmtdPort, enableException);
-      else if (testConfigMapKeyMatch(iter, "connClientPortUDP", addDashes))
-         assignKeyIfNotZero(iter, connClientPortUDP, enableException);
-      else if (testConfigMapKeyMatch(iter, "connStoragePortUDP", addDashes))
-         assignKeyIfNotZero(iter, connStoragePortUDP, enableException);
-      else if (testConfigMapKeyMatch(iter, "connMetaPortUDP", addDashes))
-         assignKeyIfNotZero(iter, connMetaPortUDP, enableException);
-      else if (testConfigMapKeyMatch(iter, "connMonPortUDP", addDashes))
-         assignKeyIfNotZero(iter, connMonPortUDP, enableException);
-      else if (testConfigMapKeyMatch(iter, "connMgmtdPortUDP", addDashes))
-         assignKeyIfNotZero(iter, connMgmtdPortUDP, enableException);
-      else if (testConfigMapKeyMatch(iter, "connStoragePortTCP", addDashes))
-         assignKeyIfNotZero(iter, connStoragePortTCP, enableException);
-      else if (testConfigMapKeyMatch(iter, "connMetaPortTCP", addDashes))
-         assignKeyIfNotZero(iter, connMetaPortTCP, enableException);
-      else if (testConfigMapKeyMatch(iter, "connMgmtdPortTCP", addDashes))
-         assignKeyIfNotZero(iter, connMgmtdPortTCP, enableException);
-      else if (testConfigMapKeyMatch(iter, "connUseRDMA", addDashes))
-         connUseRDMA = StringTk::strToBool(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connBacklogTCP", addDashes))
-         connBacklogTCP = StringTk::strToUInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connMaxInternodeNum", addDashes))
-         connMaxInternodeNum = StringTk::strToUInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connNonPrimaryExpiration", addDashes))
-      {
-         // superseded by connFallbackExpirationSecs, ignored here for config file compatibility
-      }
-      else if (testConfigMapKeyMatch(iter, "connFallbackExpirationSecs", addDashes))
-         connFallbackExpirationSecs = StringTk::strToUInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connTCPRcvBufSize", addDashes))
-         connTCPRcvBufSize = StringTk::strToInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connUDPRcvBufSize", addDashes))
-         connUDPRcvBufSize = StringTk::strToInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connRDMABufSize", addDashes))
-         connRDMABufSize = StringTk::strToUInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connRDMABufNum", addDashes))
-         connRDMABufNum = StringTk::strToUInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connRDMATypeOfService", addDashes))
-         connRDMATypeOfService = (uint8_t)StringTk::strToUInt(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connNetFilterFile", addDashes))
-         connNetFilterFile = iter->second;
-      else if (testConfigMapKeyMatch(iter, "connAuthFile", addDashes))
-         connAuthFile = iter->second;
-      else if (testConfigMapKeyMatch(iter, "connDisableAuthentication", addDashes))
-         connDisableAuthentication = StringTk::strToBool(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connTcpOnlyFilterFile", addDashes))
-         connTcpOnlyFilterFile = iter->second;
-      else if (testConfigMapKeyMatch(iter, "connRestrictOutboundInterfaces", addDashes))
-         connRestrictOutboundInterfaces = StringTk::strToBool(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connNoDefaultRoute", addDashes))
-         connNoDefaultRoute = iter->second;
-      else if (testConfigMapKeyMatch(iter, "connMessagingTimeouts", addDashes))
-      {
-         const size_t cfgValCount = 3; // count value in config file in order of long, medium and short
-         std::list<std::string> split;
-         StringList::iterator timeoutIter;
-
-         StringTk::explode(iter->second, ',', &split);
-
-         if (split.size() == cfgValCount)
-         {
-            timeoutIter = split.begin();
-            connMsgLongTimeout = StringTk::strToInt(*timeoutIter) > 0 ?
-                  StringTk::strToInt(*timeoutIter) : CONN_LONG_TIMEOUT;
-            timeoutIter++;
-
-            connMsgMediumTimeout = StringTk::strToInt(*timeoutIter) > 0 ?
-                  StringTk::strToInt(*timeoutIter) : CONN_MEDIUM_TIMEOUT;
-            timeoutIter++;
-
-            connMsgShortTimeout = StringTk::strToInt(*timeoutIter) > 0 ?
-                  StringTk::strToInt(*timeoutIter) : CONN_SHORT_TIMEOUT;
-         }
-         else
-            throw InvalidConfigException("The config argument '" + iter->first + "' is invalid");
-      }
-      else if (testConfigMapKeyMatch(iter, "connDisableIPv6", addDashes))
-         connDisableIPv6 = StringTk::strToBool(iter->second);
-      else if (testConfigMapKeyMatch(iter, "connRDMATimeouts", addDashes))
-      {
-         const size_t cfgValCount = 3;
-         const size_t cfgUtilValCount = 5;
-         std::list<std::string> split;
-
-         StringTk::explode(iter->second, ',', &split);
-         // YUCK. beegfs-ctl and beegfs-fsck use beegfs-client.conf. That file defines
-         // connRDMATimeouts as 5 comma-separated values, but user space only has 3
-         // values. The utils are supposed to ignore the configuration. cfgUtilValCount
-         // is a hack to prevent the configuration from causing a runtime error.
-         if (split.size() != cfgUtilValCount)
-         {
-            if (split.size() == cfgValCount)
-            {
-               StringList::iterator timeoutIter = split.begin();
-               connRDMATimeoutConnect = StringTk::strToInt(*timeoutIter++);
-               connRDMATimeoutFlowSend = StringTk::strToInt(*timeoutIter++);
-               connRDMATimeoutPoll = StringTk::strToInt(*timeoutIter);
-            }
-            else
-            {
-               throw InvalidConfigException("The config argument '" + iter->first + "' is invalid");
-            }
-         }
-      }
-      else if (testConfigMapKeyMatch(iter, "sysMgmtdHost", addDashes))
-         sysMgmtdHost = iter->second;
-      else if (testConfigMapKeyMatch(iter, "sysUpdateTargetStatesSecs", addDashes))
-         sysUpdateTargetStatesSecs = StringTk::strToUInt(iter->second);
-      else
-      {
-         // unknown element occurred
-         unknownElement = true;
-
-         if (enableException)
-         {
-            throw InvalidConfigException("The config argument '" + iter->first + "' is invalid");
-         }
-      }
-
-      if (unknownElement)
-      {
-         // just skip the unknown element
-         iter++;
-      }
-      else
-      {
-         // remove this element from the map
-         iter = eraseFromConfigMap(iter);
-      }
-   }
+   commonApplyConfigMap(static_cast<CommonConfigFields *>(this), &this->configMap, ArraySlice(CommonConfigFields_infos), enableException, addDashes);
 
    auto processPortSettings = [&](const std::string& name, int& setting, const int& tcp, const int& udp, const int def) {
       if(setting == -1) {
@@ -311,11 +100,29 @@ setting instead.");
       }
    };
 
-   processPortSettings("connClientPort", this->connClientPort, connClientPortTCP, connClientPortUDP, 8004);
-   processPortSettings("connStoragePort", this->connStoragePort, connStoragePortTCP, connStoragePortUDP, 8003);
-   processPortSettings("connMetaPort", this->connMetaPort, connMetaPortTCP, connMetaPortUDP, 8005);
-   processPortSettings("connMonPort", this->connMonPort, connMonPortTCP, connMonPortUDP, 8007);
-   processPortSettings("connMgmtdPort", this->connMgmtdPort, connMgmtdPortTCP, connMgmtdPortUDP, 8008);
+   processPortSettings("connClientPort", this->connClientPort, this->connClientPortTCP, this->connClientPortUDP, 8004);
+   processPortSettings("connStoragePort", this->connStoragePort, this->connStoragePortTCP, this->connStoragePortUDP, 8003);
+   processPortSettings("connMetaPort", this->connMetaPort, this->connMetaPortTCP, this->connMetaPortUDP, 8005);
+   processPortSettings("connMonPort", this->connMonPort, this->connMonPortTCP, this->connMonPortUDP, 8007);
+   processPortSettings("connMgmtdPort", this->connMgmtdPort, this->connMgmtdPortTCP, this->connMgmtdPortUDP, 8008);
+
+   connMessagingTimeouts[0] = connMessagingTimeouts[0] > 0 ? connMessagingTimeouts[0] : CONN_LONG_TIMEOUT;
+   connMessagingTimeouts[1] = connMessagingTimeouts[1] > 0 ? connMessagingTimeouts[1] : CONN_MEDIUM_TIMEOUT;
+   connMessagingTimeouts[2] = connMessagingTimeouts[2] > 0 ? connMessagingTimeouts[2] : CONN_SHORT_TIMEOUT;
+
+   {
+      size_t numRDMATimeouts = this->connRDMATimeouts.size();
+      // YUCK. beegfs-ctl and beegfs-fsck use beegfs-client.conf. That file defines
+      // connRDMATimeouts as 5 comma-separated values, but user space only has 3
+      // values. The utils are supposed to ignore the configuration. cfgUtilValCount
+      // is a hack to prevent the configuration from causing a runtime error.
+      if (numRDMATimeouts != 3 && numRDMATimeouts != 5)
+      {
+         throw InvalidConfigException(
+            "Wrong number of connRDMATimeouts configured. Expected: 3 or 5, got: "
+            + std::to_string(numRDMATimeouts));
+      }
+   }
 }
 
 void AbstractConfig::initImplicitVals()
@@ -449,21 +256,6 @@ void AbstractConfig::initSocketBufferSizes()
 }
 
 /**
- * Removes an element from the config map and returns an iterator that is positioned right
- * after the removed element
- */
-StringMapIter AbstractConfig::eraseFromConfigMap(StringMapIter iter)
-{
-   StringMapIter nextIter(iter);
-
-   nextIter++; // save position after the erase element
-
-   configMap.erase(iter);
-
-   return nextIter;
-}
-
-/**
  * @param addDashes true to prepend "--" to every config key.
  */
 void AbstractConfig::loadFromFile(const char* filename, bool addDashes)
@@ -482,7 +274,7 @@ void AbstractConfig::loadFromFile(const char* filename, bool addDashes)
    MapTk::loadStringMapFromFile(filename, &tmpMap);
 
    for(StringMapCIter iter = tmpMap.begin(); iter != tmpMap.end(); iter++)
-      configMapRedefine(iter->first, iter->second, addDashes);
+      configMapRedefine(&this->configMap, iter->first, iter->second, addDashes);
 }
 
 /**
@@ -496,30 +288,13 @@ void AbstractConfig::loadFromArgs(int argc, char** argv)
 }
 
 
-/**
- * @warning It might exit the proccess if it finds an incorrect value
- */
-void AbstractConfig::assignKeyIfNotZero(const StringMapIter& it, int& intVal, bool enableException)
-{
-   const int tempVal = StringTk::strToInt(it->second);
-
-   if (tempVal == 0) {
-      if (enableException) {
-         throw InvalidConfigException("Invalid or unset configuration variable: " + (it->first));
-      }
-      return;
-   }
-
-   intVal = tempVal;
-}
-
 // Load a list of IPNetworks from the given file if the file name is not empty
 NetFilter loadNetworkList(const std::string& file) {
    if (file.empty())
       return {};
 
    StringList filterList;
-   ICommonConfig::loadStringListFile(file.c_str(), filterList);
+   CommonConfig::loadStringListFile(file.c_str(), filterList);
 
    NetFilter res;
    for (const auto& f : filterList) {

@@ -2,8 +2,14 @@
 #define OPEN_MOUNTCONFIG_H_
 
 #include <common/Common.h>
+#include <filesystem/FhgfsOps_versions.h>
 
 #include <linux/seq_file.h>
+
+#ifdef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+struct fs_context;
+struct fs_parameter;
+#endif
 
 struct MountConfig;
 typedef struct MountConfig MountConfig;
@@ -15,6 +21,10 @@ static inline void MountConfig_uninit(MountConfig* this);
 static inline void MountConfig_destruct(MountConfig* this);
 
 extern bool MountConfig_parseFromRawOptions(MountConfig* this, char* mountOptions);
+#ifdef KERNEL_HAS_ONLY_INIT_FS_CONTEXT
+extern int MountConfig_parseParam(MountConfig* this, struct fs_context* fc,
+   struct fs_parameter* param);
+#endif
 extern void MountConfig_showOptions(MountConfig* this, struct seq_file* sf);
 
 
